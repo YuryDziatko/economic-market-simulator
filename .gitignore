@@ -1,13 +1,12 @@
 .venv/
 venv/
 env/
-
 .idea/
-
 __pycache__/
 *.py[cod]
-
 .env
-
 .DS_Store
 Thumbs.db
+results/*.csv
+db/baseline_db/
+db/shock_db/

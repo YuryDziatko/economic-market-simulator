@@ -115,7 +115,7 @@ def run_once(goods_db, cfg, producer_cfg, shocks, ticks, seed, label="",
         f"{b}={hh_stats['classes'][b]['count']}" for b in ["low","middle","high","top1","top01"]
     )
     print("── Period 0 — Equilibrium ─────────────────────────────────────────────────")
-    print(f"  Base GDP (Σ P×Q)   : ${base_gdp:>14,.0f}")
+    print(f"  Catalogue P×Q value: ${base_gdp:>14,.0f}  (annual reference, not model C+I+G)")
     print(f"  Households         : {len(households):>14,}  ({hh_counts})")
     print(f"  Firms              : {len(firms):>14,}")
     print(f"  Base inflation     :  {'0.000%':>13}  (by definition — base period)")
@@ -173,8 +173,7 @@ def run_once(goods_db, cfg, producer_cfg, shocks, ticks, seed, label="",
                 bracket_cfg, evo_rng,
             )
             print(f"  Year {year:>2} households: "
-                  f"income growth {income_growth:+.2%} "
-                  f"(GDP {gdp_growth_rate:+.2%} − pop {population_growth_rate:+.2%})  |  "
+                  f"annual income reset {income_growth:+.2%} (monthly income dynamics handled by market)  |  "
                   f"+{n_new} new  |  total: {n_before} → {len(mkt_engine.households)}")
 
             if db_dir is not None:
@@ -182,9 +181,10 @@ def run_once(goods_db, cfg, producer_cfg, shocks, ticks, seed, label="",
 
         history = engine.run_with_evolution(years, evolve_fn=_evolve_fn, ticks_per_year=12)
 
-        # Persist the final evolved catalogue as the "current" goods DB
+        # Preserve the original starting database for reproducible reruns.
+        # Save the evolved catalogue separately instead of overwriting goods_db.csv.
         if db_dir is not None:
-            catalogue["db"].to_csv(db_dir / "goods_db.csv", index=False)
+            catalogue["db"].to_csv(db_dir / "evolved_goods_db.csv", index=False)
     else:
         history = engine.run(ticks)
 
@@ -193,14 +193,16 @@ def run_once(goods_db, cfg, producer_cfg, shocks, ticks, seed, label="",
     final = history.iloc[-1]
     total_inf = (final["cpi"] / 1.0 - 1) * 100
     gdp_growth = (final["gdp_real"] / first["gdp_real"] - 1) * 100 if first["gdp_real"] else 0
+    final_nom_annual = final.get("gdp_nominal_annualized", final["gdp_nominal"] * 12)
+    final_real_annual = final.get("gdp_real_annualized", final["gdp_real"] * 12)
 
     print(f"\n── Results{' ['+label+']' if label else ''} ──────────────────────────────────")
-    print(f"  Period 0 base GDP       : ${base_gdp:>14,.0f}")
+    print(f"  Catalogue P×Q reference : ${base_gdp:>14,.0f}")
     print(f"  Period 0 inflation      : {'0.000%':>14}")
     print(f"  Final CPI               : {final['cpi']:>14.4f}")
     print(f"  Total inflation         : {total_inf:>13.1f}%")
-    print(f"  Final nominal GDP       : ${final['gdp_nominal']:>14,.0f}")
-    print(f"  Final real GDP          : ${final['gdp_real']:>14,.0f}")
+    print(f"  Final nominal GDP (ann.): ${final_nom_annual:>14,.0f}")
+    print(f"  Final real GDP (ann.)   : ${final_real_annual:>14,.0f}")
     print(f"  Real GDP growth (total) : {gdp_growth:>13.1f}%")
     print(f"  Final Gini              : {final['gini']:>14.4f}")
     print("─────────────────────────────────────────────────────────────\n")
@@ -211,7 +213,7 @@ def run_once(goods_db, cfg, producer_cfg, shocks, ticks, seed, label="",
 def main():
     parser = argparse.ArgumentParser(description="Economics Simulation v2")
     parser.add_argument("--ticks",          type=int, default=120)
-    parser.add_argument("--config",         default="config/simulation_config.xlsx")
+    parser.add_argument("--config",         default="simulation_config.xlsx")
     parser.add_argument("--db",             default="db/goods_db.csv")
     parser.add_argument("--out",            default="results/history.csv")
     parser.add_argument("--shock",          type=str, default=None,

@@ -200,24 +200,26 @@ def derive_household_classes(
 
     rng = np.random.default_rng(rng_seed)
     incomes_by_bracket = {}
+    # Sample directly from each percentile interval via the inverse CDF.
+    # The old rejection sampler sorted candidates and took the lowest n, which
+    # systematically distorted the distribution and pushed generated Gini away
+    # from the configured target.
     for i, b in enumerate(BRACKET_ORDER):
-        lo, hi = thresholds[i], thresholds[i + 1]
         n_b = counts[b]
         if n_b <= 0:
             incomes_by_bracket[b] = np.array([])
             continue
-        mult = 10 if b in ("top1", "top01") else 5
-        samp = rng.lognormal(mu_ln, sigma, n_b * mult)
-        samp = samp[samp > lo]
-        if hi < 1e18:
-            samp = samp[samp <= hi]
-        samp = np.sort(samp)[:n_b]
-        if len(samp) < n_b:
-            mean_b = lognormal_conditional_mean(mu_ln, sigma, lo, hi)
-            extra  = rng.lognormal(np.log(max(mean_b, 1)), sigma * 0.1, n_b - len(samp))
-            samp   = np.concatenate([samp, extra])
-        incomes_by_bracket[b] = samp[:n_b]
+        p_lo = cuts_pct[i] / 100.0
+        p_hi = min(cuts_pct[i + 1] / 100.0, 0.9999995)
+        u = rng.uniform(max(p_lo, 1e-7), p_hi, n_b)
+        incomes_by_bracket[b] = dist.ppf(u)
 
+    # Preserve the model's intended aggregate monthly household income exactly.
+    total_sampled = sum(arr.sum() for arr in incomes_by_bracket.values())
+    target_total_monthly = avg_monthly_income * total_households
+    if total_sampled > 0:
+        scale = target_total_monthly / total_sampled
+        incomes_by_bracket = {b: arr * scale for b, arr in incomes_by_bracket.items()}
     total_sampled = sum(arr.sum() for arr in incomes_by_bracket.values())
     classes = {}
     for i, b in enumerate(BRACKET_ORDER):
@@ -271,9 +273,11 @@ def evolve_households(
     Mutates incomes in place, appends new households, returns
     (households, n_new_households, income_growth_rate_applied).
     """
-    income_growth = gdp_growth_rate - population_growth_rate
-    for hh in households:
-        hh.income = max(1.0, hh.income * (1 + income_growth))
+    # Existing household incomes are already updated monthly by MarketEngine.
+    # Do not apply GDP growth again here: doing so creates a circular feedback
+    # (lower GDP -> lower income -> lower demand -> still lower GDP) and double
+    # counts income growth. Annual evolution is population entry only in V3.
+    income_growth = 0.0
 
     total_now = len(households)
     n_new = max(0, round(total_now * population_growth_rate))
@@ -342,11 +346,23 @@ def save_household_snapshot(households: List[Household], year, out_dir: Path) ->
     return path
 
 
+def _gini_from_incomes(incomes) -> float:
+    values = sorted(max(0.0, float(x)) for x in incomes)
+    n = len(values)
+    total = sum(values)
+    if n == 0 or total <= 0:
+        return 0.0
+    weighted = sum((2 * (i + 1) - n - 1) * y for i, y in enumerate(values))
+    return weighted / (n * total)
+
+
 def print_household_report(households: List[Household], gini: float):
     total_income = sum(h.income for h in households)
     n = len(households)
+    actual_gini = _gini_from_incomes(h.income for h in households)
     print("\n── Household Database ───────────────────────────────────────────────────────────────")
-    print(f"  Gini coefficient   : {gini:.3f}")
+    print(f"  Target Gini        : {gini:.3f}")
+    print(f"  Generated Gini     : {actual_gini:.3f}")
     print(f"  Total households   : {n:,}")
     print(f"  Avg monthly income : ${total_income / max(n,1):,.0f}")
     print()

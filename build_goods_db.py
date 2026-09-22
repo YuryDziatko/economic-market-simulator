@@ -16,6 +16,36 @@ PRICE_VARIANTS    = ["Price (USD)","Price/Rate (USD)","Estimated Price (USD)"]
 CATEGORY_VARIANTS = ["Category Name","Category"]
 UNIT_VARIANTS     = ["Unit Size","Unit"]
 
+# Proxy target expenditure shares used to prevent random unit assignment from
+# making a few high-price divisions dominate the base economy. Values are
+# normalized before use. They match the household COICOP basket calibration.
+TARGET_DIVISION_WEIGHTS = {
+    "01": 0.136, "02": 0.014, "03": 0.030, "04": 0.175,
+    "05": 0.055, "06": 0.073, "07": 0.151, "08": 0.035,
+    "09": 0.055, "10": 0.030, "11": 0.065, "12": 0.035,
+}
+
+def calibrate_division_shares(db):
+    """Rescale within-division quantities to stable target expenditure shares.
+
+    Random quantities are still used to create product-level heterogeneity, but
+    division totals no longer depend on whether a division happens to contain
+    expensive goods such as vehicles or tuition. Total base P×Q is preserved.
+    """
+    db = db.copy()
+    raw_value = db["price_usd"] * db["quantity"]
+    total_value = float(raw_value.sum())
+    weight_total = sum(TARGET_DIVISION_WEIGHTS.values())
+    for div, idx in db.groupby("coicop_division").groups.items():
+        current = float((db.loc[idx, "price_usd"] * db.loc[idx, "quantity"]).sum())
+        target_w = TARGET_DIVISION_WEIGHTS.get(str(div).zfill(2))
+        if current <= 0 or target_w is None:
+            continue
+        target = total_value * target_w / weight_total
+        scale = target / current
+        db.loc[idx, "quantity"] = (db.loc[idx, "quantity"] * scale).round().clip(lower=1).astype(int)
+    return db
+
 def pick(cols, variants):
     for v in variants:
         if v in cols: return v
@@ -109,7 +139,7 @@ def summary(db):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input",   default="Product_List.xlsx")
-    parser.add_argument("--config",  default="config/simulation_config.xlsx")
+    parser.add_argument("--config",  default="simulation_config.xlsx")
     parser.add_argument("--out-dir", default="db")
     parser.add_argument("--seed",    type=int, default=42)
     args = parser.parse_args()
@@ -127,6 +157,8 @@ def main():
 
     print("Assigning quantities...")
     db = assign_quantities(db, qty_config, seed=args.seed)
+    print("Calibrating division expenditure shares...")
+    db = calibrate_division_shares(db)
 
     print("Saving...")
     csv_path, db_path = save(db, args.out_dir)

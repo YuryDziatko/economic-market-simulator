@@ -170,10 +170,17 @@ def plot_gdp(ax, datasets: list, labels: list):
         color = ACCENT if i == 0 else BLUE
         lw    = 2.0  if i == 0 else 1.5
         ls    = "-"  if i == 0 else "--"
-        gdp_col = "gdp_real" if "gdp_real" in df.columns else "gdp_nominal" if "gdp_nominal" in df.columns else "gdp"
-    ax.plot(df["year"], df[gdp_col] / 1e6, color=color, lw=lw, ls=ls, label=label)
+        if "gdp_real_annualized" in df.columns:
+            gdp_col = "gdp_real_annualized"
+        elif "gdp_real" in df.columns:
+            gdp_col = "gdp_real"
+        elif "gdp_nominal" in df.columns:
+            gdp_col = "gdp_nominal"
+        else:
+            gdp_col = "gdp"
+        ax.plot(df["year"], df[gdp_col] / 1e6, color=color, lw=lw, ls=ls, label=label)
 
-    ax.set_title("GDP (real, CPI-deflated)", fontsize=12, fontweight="bold", pad=8)
+    ax.set_title("GDP (real, CPI-deflated, annualized)", fontsize=12, fontweight="bold", pad=8)
     ax.set_xlabel("Year", fontsize=10)
     ax.set_ylabel("Real GDP (millions USD)", fontsize=10)
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"${x:.1f}M"))
