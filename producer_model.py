@@ -59,6 +59,7 @@ class Firm:
     profit:           float = 0.0
     investment:       float = 0.0
     utilization:      float = 0.0
+    productivity_index: float = 1.0
 
     def __post_init__(self):
         self.cost_ratio = COST_RATIO.get((self.size, self.ownership), 0.80)
@@ -68,6 +69,14 @@ class Firm:
     @property
     def profit_margin(self) -> float:
         return self.profit / self.revenue if self.revenue > 0 else 0.0
+
+    @property
+    def effective_capacity(self) -> float:
+        """Monthly real output capacity after productivity improvements."""
+        return self.production_capacity * self.productivity_index
+
+    def advance_productivity(self, monthly_rate: float) -> None:
+        self.productivity_index *= (1.0 + max(-0.99, monthly_rate))
 
     def initialize_market_state(self, monthly_division_demand: float,
                                 inventory_months: float = 0.10,
@@ -89,9 +98,9 @@ class Firm:
     def plan_and_produce(self, supply_factor: float = 1.0) -> None:
         """Produce from lagged expected demand; current-period demand is not known yet."""
         desired = max(0.0, self.expected_demand + self.target_inventory - self.inventory)
-        effective_capacity = max(0.0, self.production_capacity * max(0.0, supply_factor))
+        effective_capacity = max(0.0, self.effective_capacity * max(0.0, supply_factor))
         self.production = min(desired, effective_capacity)
-        self.utilization = self.production / max(self.production_capacity, 1e-9)
+        self.utilization = self.production / max(self.effective_capacity, 1e-9)
         self.inventory += self.production
 
     def fulfill_orders(self, units_demanded: float) -> None:
@@ -104,7 +113,8 @@ class Firm:
         """Calculate financial results, update forecast, and make a modest capacity decision."""
         price = max(0.01, division_price_index)
         self.revenue = self.units_sold * price
-        unit_cost = max(0.01, self.cost_ratio * max(0.05, cost_factor))
+        unit_cost = max(0.01, (self.cost_ratio * max(0.05, cost_factor))
+                        / max(self.productivity_index, 1e-9))
         variable_cost = self.production * unit_cost
         # Small fixed operating cost keeps idle capacity from being free.
         fixed_cost = self.production_capacity * self.cost_ratio * 0.01

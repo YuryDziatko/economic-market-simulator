@@ -93,13 +93,19 @@ class Household:
         return 1 - self.consumption_rate
 
     def demand_for(self, division: str, price_index: float, base_price_index: float = 1.0) -> float:
-        base_spend = self.total_spend * self.basket.get(division, 0.0)
-        if base_price_index <= 0:
-            return base_spend
+        """Desired real quantity for a division.
+
+        At the base price index (1.0), one model output unit costs one dollar, so
+        the household's allocated spending budget is numerically equal to base
+        quantity. Price elasticity is applied directly to quantity. This avoids
+        applying the price effect twice (elasticity + a second division by price).
+        """
+        base_quantity = self.total_spend * self.basket.get(division, 0.0)
+        if base_price_index <= 0 or price_index <= 0:
+            return base_quantity
         ratio = price_index / base_price_index
         e = ELASTICITY.get(division, -0.5)
-        adj = max(0.05, 1 + e * (ratio - 1))
-        return base_spend * adj
+        return max(0.0, base_quantity * (ratio ** e))
 
 
 # ── Config loaders ─────────────────────────────────────────────────────────────

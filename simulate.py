@@ -36,6 +36,9 @@ def load_config(config_path: Path) -> dict:
             "consumption_share": 0.60, "savings_rate": 0.10,
             "tax_rate": 0.22, "money_growth": 0.002,
             "population_growth_rate": 0.01,
+            "inflation_target_annual": 0.02,
+            "productivity_growth_rate": 0.015,
+            "capital_productivity_multiplier": 1.50,
         }
     df = pd.read_excel(config_path, sheet_name="household_config", header=1)
     df.columns = [str(c).strip().lower() for c in df.columns]
@@ -48,6 +51,9 @@ def load_config(config_path: Path) -> dict:
         "tax_rate":               float(cfg.get("tax_rate",                 0.22)),
         "money_growth":           float(cfg.get("money_supply_growth",      0.002)),
         "population_growth_rate": float(cfg.get("population_growth_rate",   0.01)),
+        "inflation_target_annual": float(cfg.get("inflation_target_annual",  0.02)),
+        "productivity_growth_rate": float(cfg.get("productivity_growth_rate", 0.015)),
+        "capital_productivity_multiplier": float(cfg.get("capital_productivity_multiplier", 1.50)),
     }
 
 
@@ -129,6 +135,9 @@ def run_once(goods_db, cfg, producer_cfg, shocks, ticks, seed, label="",
         goods_db     = goods_db,
         tax_rate     = cfg["tax_rate"],
         money_growth = cfg["money_growth"],
+        inflation_target_annual = cfg["inflation_target_annual"],
+        productivity_growth_annual = cfg["productivity_growth_rate"],
+        capital_productivity_multiplier = cfg["capital_productivity_multiplier"],
     )
     for shock in shocks:
         engine.add_shock(shock)
@@ -140,53 +149,46 @@ def run_once(goods_db, cfg, producer_cfg, shocks, ticks, seed, label="",
     print(f"\nRunning{' ['+label+']' if label else ''}: "
           f"{ticks} ticks ({years} years)\n")
 
-    if evolve and config_path is not None:
-        evo_rng = random.Random(seed + 9001)
-        population_growth_rate = cfg.get("population_growth_rate", 0.01)
-        catalogue = {"db": goods_db}   # mutable holder so the closure can update it
+    # Annual demographic updates are independent of product-catalogue evolution.
+    # --no-evolution disables only catalogue mutation; population can still grow.
+    evo_rng = random.Random(seed + 9001)
+    population_growth_rate = cfg.get("population_growth_rate", 0.01)
+    catalogue = {"db": goods_db}
 
-        def _evolve_fn(year: int, mkt_engine: MarketEngine, gdp_growth_rate: float = 0.0):
-            # ── Product catalogue evolution ──────────────────────────────────
+    def _evolve_fn(year: int, mkt_engine: MarketEngine, gdp_growth_rate: float = 0.0):
+        if evolve and config_path is not None:
+            # ── Product catalogue evolution ────────────────────────────────
             old_db = catalogue["db"]
             old_div_price = old_db.groupby("coicop_division")["price_usd"].mean()
-
             new_db = evolve_year(old_db, year, config_path, evo_rng)
             catalogue["db"] = new_db
 
             new_div_gdp   = new_db.groupby("coicop_division")["gdp_contribution"].sum()
             new_div_price = new_db.groupby("coicop_division")["price_usd"].mean()
-
             for div in mkt_engine.divisions:
                 gdp_val = float(new_div_gdp.get(div, mkt_engine.base_div_gdp.get(div, 0)))
                 old_p   = float(old_div_price.get(div, 1.0)) or 1.0
                 new_p   = float(new_div_price.get(div, old_p))
                 price_shift = (new_p / old_p) - 1
                 mkt_engine.rebase_division(div, gdp_val, price_shift)
-
             if db_dir is not None:
                 save_yearly_snapshot(new_db, year, db_dir, db_dir / "economics.db")
 
-            # ── Household evolution: income growth + population growth ───────
-            n_before = len(mkt_engine.households)
-            mkt_engine.households, n_new, income_growth = evolve_households(
-                mkt_engine.households, gdp_growth_rate, population_growth_rate,
-                bracket_cfg, evo_rng,
-            )
-            print(f"  Year {year:>2} households: "
-                  f"annual income reset {income_growth:+.2%} (monthly income dynamics handled by market)  |  "
-                  f"+{n_new} new  |  total: {n_before} → {len(mkt_engine.households)}")
-
-            if db_dir is not None:
-                save_household_snapshot(mkt_engine.households, year, db_dir)
-
-        history = engine.run_with_evolution(years, evolve_fn=_evolve_fn, ticks_per_year=12)
-
-        # Preserve the original starting database for reproducible reruns.
-        # Save the evolved catalogue separately instead of overwriting goods_db.csv.
+        # ── Demographic evolution ─────────────────────────────────────────
+        n_before = len(mkt_engine.households)
+        mkt_engine.households, n_new, _ = evolve_households(
+            mkt_engine.households, gdp_growth_rate, population_growth_rate,
+            bracket_cfg, evo_rng,
+        )
+        print(f"  Year {year:>2} population: +{n_new} households  |  "
+              f"total: {n_before} → {len(mkt_engine.households)}")
         if db_dir is not None:
-            catalogue["db"].to_csv(db_dir / "evolved_goods_db.csv", index=False)
-    else:
-        history = engine.run(ticks)
+            save_household_snapshot(mkt_engine.households, year, db_dir)
+
+    history = engine.run_with_evolution(ticks, evolve_fn=_evolve_fn, ticks_per_year=12)
+
+    if evolve and db_dir is not None:
+        catalogue["db"].to_csv(db_dir / "evolved_goods_db.csv", index=False)
 
     # ── Final summary ───────────────────────────────────────────────────────
     first = history.iloc[0]

@@ -47,6 +47,9 @@ class MarketEngine:
     def __init__(self, households: List[Household], firms: List[Firm],
                  goods_db: pd.DataFrame, tax_rate: float = 0.22,
                  money_growth: float = 0.002,
+                 inflation_target_annual: float = 0.02,
+                 productivity_growth_annual: float = 0.015,
+                 capital_productivity_multiplier: float = 1.50,
                  subsidy_divs: Dict[str, float] = None,
                  price_caps: Dict[str, float] = None):
         self.households = households
@@ -54,6 +57,11 @@ class MarketEngine:
         self.goods_db = goods_db
         self.tax_rate = tax_rate
         self.money_growth = money_growth
+        self.inflation_target_annual = inflation_target_annual
+        self.productivity_growth_annual = productivity_growth_annual
+        self.capital_productivity_multiplier = capital_productivity_multiplier
+        self.inflation_target_monthly = (1.0 + inflation_target_annual) ** (1.0 / 12.0) - 1.0
+        self.productivity_growth_monthly = (1.0 + productivity_growth_annual) ** (1.0 / 12.0) - 1.0
         self.subsidy_divs = subsidy_divs or {"01": 0.05, "06": 0.10}
         self.price_caps = price_caps or {}
         self.shocks: List[Shock] = []
@@ -102,16 +110,12 @@ class MarketEngine:
                 f.div_gdp = new_div_gdp
 
     # ── Demand ──────────────────────────────────────────────────────────────
-    def _nominal_spending_demand(self, division: str, tick: int) -> float:
-        spend = sum(hh.demand_for(division, self.price_index[division], 1.0)
-                    for hh in self.households)
-        return spend * self._shock_multiplier(division, "demand", tick)
-
     def _quantity_demand(self, division: str, tick: int) -> float:
-        # demand_for returns desired nominal spending; convert it to a real
-        # quantity using the current division price index.
-        spend = self._nominal_spending_demand(division, tick)
-        return spend / max(self.price_index[division], 1e-9)
+        # Household.demand_for returns desired real quantity. Price elasticity
+        # is already applied there, so do not divide by price a second time.
+        quantity = sum(hh.demand_for(division, self.price_index[division], 1.0)
+                       for hh in self.households)
+        return quantity * self._shock_multiplier(division, "demand", tick)
 
     # ── Firms / market clearing ─────────────────────────────────────────────
     def _operate_firms(self, tick: int) -> Dict[str, dict]:
@@ -124,8 +128,10 @@ class MarketEngine:
             supply_factor = self._shock_multiplier(div, "supply", tick)
             cost_factor = self._shock_multiplier(div, "cost", tick)
 
-            # Firms produce before observing current-period household demand.
+            # Productivity improves effective capacity and lowers unit costs over time.
+            # Firms still produce before observing current-period household demand.
             for f in div_firms:
+                f.advance_productivity(self.productivity_growth_monthly)
                 f.plan_and_produce(supply_factor=supply_factor)
 
             total_demand = self._quantity_demand(div, tick)
@@ -188,7 +194,7 @@ class MarketEngine:
             subsidy = self.subsidy_divs.get(div, 0.0)
             delta = (shortage_sensitivity * shortage_rate
                      - inventory_sensitivity * max(0.0, inventory_gap)
-                     + self.money_growth
+                     + self.inflation_target_monthly
                      + cost_pass
                      - subsidy * 0.002)
             delta = max(-0.05, min(0.05, delta))
@@ -213,10 +219,32 @@ class MarketEngine:
         weighted = sum((2 * (i + 1) - n - 1) * y for i, y in enumerate(incomes))
         return weighted / (n * total)
 
-    def tick(self, t: int) -> EconomicState:
-        # Nominal income growth happens before households form current demand.
+    def _update_household_incomes(self) -> None:
+        """Grow income by source, linking real wage growth to productivity.
+
+        Labor income: inflation target + productivity growth.
+        Transfers: indexed to inflation target.
+        Capital income: inflation target + a larger productivity-linked return.
+        The household's fixed source shares determine its blended growth rate.
+        """
+        labor_annual = self.inflation_target_annual + self.productivity_growth_annual
+        transfer_annual = self.inflation_target_annual
+        capital_annual = (self.inflation_target_annual
+                          + self.productivity_growth_annual * self.capital_productivity_multiplier)
+
+        labor_m = (1.0 + labor_annual) ** (1.0 / 12.0) - 1.0
+        transfer_m = (1.0 + transfer_annual) ** (1.0 / 12.0) - 1.0
+        capital_m = (1.0 + capital_annual) ** (1.0 / 12.0) - 1.0
+
         for hh in self.households:
-            hh.income *= (1 + self.money_growth * 0.5)
+            growth = (hh.labor_share * labor_m
+                      + hh.capital_share * capital_m
+                      + hh.transfer_share * transfer_m)
+            hh.income *= (1.0 + growth)
+
+    def tick(self, t: int) -> EconomicState:
+        # Income growth occurs before households form current demand.
+        self._update_household_incomes()
 
         stats = self._operate_firms(t)
 
@@ -271,7 +299,7 @@ class MarketEngine:
             demand = sum(f.units_demanded for f in fs)
             sold = sum(f.units_sold for f in fs)
             inventory = sum(f.inventory for f in fs)
-            capacity = sum(f.production_capacity for f in fs)
+            capacity = sum(f.effective_capacity for f in fs)
             production = sum(f.production for f in fs)
             row[f"demand_{d}"] = round(demand, 2)
             row[f"sales_{d}"] = round(sold, 2)
@@ -293,31 +321,36 @@ class MarketEngine:
                       f"Gini={state.gini:.3f}")
         return pd.DataFrame(rows)
 
-    def run_with_evolution(self, years: int, evolve_fn, ticks_per_year: int = 12) -> pd.DataFrame:
+    def run_with_evolution(self, total_ticks: int, evolve_fn, ticks_per_year: int = 12) -> pd.DataFrame:
+        """Run an exact number of ticks and apply annual updates after each full year."""
         rows = []
         prev_year_gdp_real = None
-        state = None
-        for year in range(1, years + 1):
-            for t_in_year in range(1, ticks_per_year + 1):
-                t = (year - 1) * ticks_per_year + t_in_year
-                state = self.tick(t)
-                row = self._state_row(state)
-                row["households"] = len(self.households)
-                rows.append(row)
+        for t in range(1, total_ticks + 1):
+            state = self.tick(t)
+            row = self._state_row(state)
+            row["households"] = len(self.households)
+            rows.append(row)
 
-            annual_real = state.gdp_real * 12
-            gdp_growth_rate = 0.0
-            if prev_year_gdp_real:
-                gdp_growth_rate = annual_real / prev_year_gdp_real - 1
-            prev_year_gdp_real = annual_real
+            if t % ticks_per_year == 0:
+                year = t // ticks_per_year
+                annual_real = state.gdp_real * 12
+                gdp_growth_rate = 0.0
+                if prev_year_gdp_real:
+                    gdp_growth_rate = annual_real / prev_year_gdp_real - 1
+                prev_year_gdp_real = annual_real
 
-            print(f"  Year {year:>2}  CPI={state.cpi:.4f}  "
-                  f"Inf={state.inflation_yoy:+.1f}%  "
-                  f"GDP_ann=${state.gdp_nominal*12:>11,.0f}  "
-                  f"GDP_growth={gdp_growth_rate:+.2%}  "
-                  f"Shortage={state.total_shortage_rate:.2%}  "
-                  f"Gini={state.gini:.3f}  HH={len(self.households):,}")
+                avg_income = sum(h.income for h in self.households) / max(len(self.households), 1)
+                avg_prod = sum(f.productivity_index for f in self.firms) / max(len(self.firms), 1)
+                print(f"  Year {year:>2}  CPI={state.cpi:.4f}  "
+                      f"Inf={state.inflation_yoy:+.1f}%  "
+                      f"GDP_ann=${state.gdp_nominal*12:>11,.0f}  "
+                      f"GDP_growth={gdp_growth_rate:+.2%}  "
+                      f"Prod={avg_prod:.3f}  "
+                      f"AvgInc=${avg_income:,.0f}  "
+                      f"Shortage={state.total_shortage_rate:.2%}  "
+                      f"Gini={state.gini:.3f}  HH={len(self.households):,}")
 
-            if year < years and evolve_fn is not None:
-                evolve_fn(year, self, gdp_growth_rate)
+                if t < total_ticks and evolve_fn is not None:
+                    evolve_fn(year, self, gdp_growth_rate)
         return pd.DataFrame(rows)
+

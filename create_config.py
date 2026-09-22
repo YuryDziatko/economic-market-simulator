@@ -116,7 +116,10 @@ def sheet_household(wb):
         ("savings_rate",               0.10,    "Overall calibration rate used only to size total household income from GDP"),
         ("tax_rate",                   0.22,    "Average income tax rate applied by government"),
         ("money_supply_growth",        0.002,   "Monthly money supply growth rate (~2.4% annual inflation at baseline)"),
-        ("population_growth_rate",     0.01,    "Annual %% growth in number of households — new households added each year"),
+        ("population_growth_rate",     0.01,    "Annual growth in number of households — new households added each year"),
+        ("inflation_target_annual",    0.02,    "Annual baseline inflation target used for normal price drift and transfer indexation"),
+        ("productivity_growth_rate",   0.015,   "Annual firm productivity growth; raises effective capacity and real wage growth"),
+        ("capital_productivity_multiplier", 1.50, "Capital income gets this multiple of productivity growth above inflation"),
     ]
     for r, (param, val, desc) in enumerate(rows, 3):
         alt = (r % 2 == 0)
