@@ -48,7 +48,26 @@ def load_settings(path: Path) -> dict:
     if (quantity["Max Qty / Product"] < quantity["Min Qty / Product"]).any():
         raise ValueError("Quantity max cannot be less than quantity min")
 
-    return {"general": general, "classes": classes, "sizes": sizes, "ownership": ownership, "markets": markets, "quantity": quantity}
+    baskets = pd.read_excel(path, sheet_name="Consumption_Baskets", header=3)
+    baskets = baskets.dropna(subset=["Division"]).copy()
+    baskets["Division"] = baskets["Division"].astype(str).str.replace(r"\.0$", "", regex=True).str.zfill(2)
+    class_names = classes["Class"].astype(str).tolist()
+    for class_name in class_names:
+        if class_name not in baskets.columns:
+            raise ValueError(f"Consumption_Baskets is missing class column: {class_name}")
+        baskets[class_name] = pd.to_numeric(baskets[class_name], errors="raise")
+        if (baskets[class_name] <= 0).any():
+            raise ValueError("Consumption basket preference multipliers must be positive")
+
+    return {
+        "general": general,
+        "classes": classes,
+        "sizes": sizes,
+        "ownership": ownership,
+        "markets": markets,
+        "quantity": quantity,
+        "baskets": baskets,
+    }
 
 
 def load_products(path: Path) -> pd.DataFrame:
@@ -79,9 +98,15 @@ def save_outputs(output_dir: Path, **frames):
     output_dir.mkdir(parents=True, exist_ok=True)
     for name, df in frames.items():
         df.to_csv(output_dir / f"{name}.csv", index=False)
-    excel_path = output_dir / "Simulation_Output.xlsx"
+
+    # This workbook is convenience output when the project is run locally in PyCharm.
+    excel_path = output_dir / "Simulation_Output_Phase1.xlsx"
     with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
-        preferred = ["yearly_summary", "monthly_macro", "households", "companies", "products", "production"]
+        preferred = [
+            "yearly_summary", "monthly_macro", "households", "companies",
+            "products", "production", "basket_calibration", "company_events",
+            "product_monthly"
+        ]
         for name in preferred:
             if name in frames:
                 frames[name].to_excel(writer, sheet_name=name[:31], index=False)

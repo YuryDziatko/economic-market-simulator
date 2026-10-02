@@ -1,91 +1,89 @@
-# EconomicSimulation — Phase 0
+# EconomicSimulation — Phase 1
 
-A PyCharm-ready starting point for an agent-based economic simulation using the supplied product list.
+Phase 1 turns the Phase-0 baseline into a monthly supply/demand simulation.
 
-## Starting accounting identity
+## New in Phase 1
 
-At Period 0 the project enforces:
+- Household consumption baskets by income class.
+- Period-0 basket calibration so class budgets and product sales reconcile exactly.
+- Product demand reacts to price using each product's 0–1 elasticity.
+- Household class budgets constrain total planned spending.
+- Product inventory, realized sales, unmet demand, shortages, and surpluses.
+- Endogenous price response to supply/demand imbalance plus background inflation.
+- Company/product production responds gradually to demand.
+- Competitive markets react faster than oligopoly; oligopoly faster than monopoly.
+- Real GDP changes because product quantities now change.
+- Household count grows once per year using `demographic_growth` (1% default).
+- Company count grows once per year from the previous year's real GDP growth.
 
-**GDP = total product value = total producer revenue = total household gross income**
+## Annual growth rules
 
-With the default **tax = transfer = savings = 0**, household **consumption = income = GDP**.
+### Households
 
-## Included databases
+At the start of simulation Year 2 and later:
 
-- `products`: 477 products/services from `Product_List.xlsx`, plus quantity, price, elasticity and market structure.
-- `households`: Low, Middle, High, Top 1%, Top 0.1%; income distribution calibrated to the chosen Gini.
-- `companies`: Private/Public and Small/Middle/Big producers with revenue, fixed costs, variable costs, profit, margin, investment.
-- `production`: many-to-many link between companies and products.
-- `monthly_macro`: GDP, GDP growth, CPI/inflation, household/company counts, household consumption, producer profit.
-- `yearly_summary`: one row per simulated year.
+`Households(year) = round(initial_households × (1 + demographic_growth)^(year - 1))`
+
+With 1,000 initial households and 1% demographics:
+
+- Year 1: 1,000
+- Year 2: 1,010
+- Year 3: about 1,020
+
+### Companies
+
+At the start of Year 2 and later:
+
+`company_entry_rate = max(previous_real_GDP_growth, 0) × company_growth_sensitivity`
+
+`new_companies = round(current_companies × company_entry_rate)`
+
+Default sensitivity = 1.0.
+
+Example: if real GDP grew 3%, about 3% more companies enter.
+
+Company exits during recessions are disabled by default. Set `allow_company_exits = 1` to enable them.
+
+## Monthly Phase-1 loop
+
+1. Determine current household count and class consumption budgets.
+2. Calculate product demand by household class.
+3. Apply product price elasticity.
+4. Re-scale each class to its consumption budget.
+5. Compare demand with production + inventory.
+6. Realized sales are limited by available supply.
+7. Unsold output becomes inventory; excess demand becomes unmet demand.
+8. Price changes from background inflation plus supply/demand pressure.
+9. Next month's production adjusts toward demand.
+10. Recalculate nominal GDP, real GDP, inflation, profit, shortages and inventory.
+
+## Important Phase-1 simplifications
+
+- Household income distribution/Gini is fixed in real terms after Period 0.
+- New households preserve the same class distribution.
+- New companies affect the company population count; detailed entrant balance sheets and product assignments are a later refinement.
+- The interest rate is still stored but not behavioral yet.
+- Government spending is not yet modeled.
+- Product demand uses own-price elasticity only; explicit substitute/complement cross-elasticities are a future phase.
 
 ## Run in PyCharm
 
-1. Open this folder as a PyCharm project.
-2. Select Python 3.11+.
-3. In the terminal run:
+Use Python 3.11+.
 
 ```bash
 pip install -r requirements.txt
+python main.py
 ```
 
-4. Edit `data/Simulation_Settings.xlsx`.
-5. Run `main.py`.
-6. Review `output/Simulation_Output.xlsx` and the CSV files.
+Edit assumptions in:
 
-## Editable settings workbook
+`data/Simulation_Settings.xlsx`
 
-### General_Settings
-Defaults requested for the starting model:
+Main outputs are written to `output/`, including:
 
-- Gini = 30%
-- Taxes = 0%
-- Interest rate = 0%
-- Inflation = 2%
-- Households = 1,000
-- Companies = 1,000
-- Simulation = 10 years
-
-### Household_Classes
-Default percentile groups:
-
-- Low = bottom 40%
-- Middle = 40–80%
-- High = 80–99%
-- Top 1% = 99–99.9%
-- Top 0.1% = top 0.1%
-
-The class counts come from these shares. The chosen Gini changes the average income and income share of each group.
-
-### Company_Settings
-Defaults:
-
-- Size mix: 70% Small, 25% Middle, 5% Big
-- Ownership: 90% Private, 10% Public
-- Markets: 70% Competitive, 25% Oligopoly, 5% Monopoly
-- Competitive: 8–20 firms per product
-- Oligopoly: 3–4 firms
-- Monopoly: 1 firm
-
-### Quantity_Limits
-Each product category has an editable minimum and maximum monthly quantity. The Period-0 quantity of each product is random inside that interval.
-
-## Phase 0 dynamics
-
-- Quantities are fixed after Period 0.
-- Each month product prices change around `annual inflation / 12`.
-- The cross-product median price change is targeted to `inflation / 12`.
-- Random dispersion allows individual prices to rise faster/slower and occasionally fall.
-- Product absolute demand elasticity is random from 0 to 1, but is not yet used.
-- Real GDP growth is 0% because quantities are fixed; nominal GDP changes with prices.
-
-## Good Phase 1 additions
-
-1. Household consumption baskets by income class.
-2. Elasticity-driven demand when relative prices change.
-3. Inventories, shortages and unsold goods.
-4. Company hiring/wages and unemployment.
-5. Company investment and entry/exit.
-6. Government taxes, transfers and spending.
-7. Interest rate effects on saving, credit and investment.
-8. Endogenous GDP growth and inflation instead of exogenous price drift.
+- `monthly_macro.csv`
+- `yearly_summary.csv`
+- `product_monthly.csv`
+- `company_events.csv`
+- `basket_calibration.csv`
+- `Simulation_Output_Phase1.xlsx`

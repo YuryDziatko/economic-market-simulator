@@ -19,6 +19,7 @@ def money(x):
 def main():
     cfg = load_settings(DATA / "Simulation_Settings.xlsx")
     g = cfg["general"]
+
     target_gini = float(g["target_gini"])
     tax_rate = float(g["tax_rate"])
     interest_rate = float(g["interest_rate"])
@@ -28,16 +29,29 @@ def main():
     years = int(g["simulation_years"])
     seed = int(g["random_seed"])
     price_noise = float(g["monthly_price_noise_std"])
+
+    demographic_growth = float(g["demographic_growth"])
+    company_growth_sensitivity = float(g["company_growth_sensitivity"])
+    allow_company_exits = bool(int(g["allow_company_exits"]))
+    price_adjustment_speed = float(g["price_adjustment_speed"])
+    production_adjustment_speed = float(g["production_adjustment_speed"])
+    max_monthly_price_change = float(g["max_monthly_price_change"])
+    max_monthly_production_change = float(g["max_monthly_production_change"])
+    initial_inventory_months = float(g["initial_inventory_months"])
+
     rng = np.random.default_rng(seed)
 
     products = load_products(DATA / "Product_List.xlsx")
     products = prepare_products(products, cfg["quantity"], cfg["markets"], rng)
     period0_gdp = float(products["Revenue_P0"].sum())
 
-    households = generate_households(n_households, period0_gdp, target_gini, tax_rate, cfg["classes"], rng)
-    companies, production = generate_companies(products, n_companies, cfg["sizes"], cfg["ownership"], rng)
+    households = generate_households(
+        n_households, period0_gdp, target_gini, tax_rate, cfg["classes"], rng
+    )
+    companies, production = generate_companies(
+        products, n_companies, cfg["sizes"], cfg["ownership"], rng
+    )
 
-    # Accounting reconciliation at the starting equilibrium.
     company_revenue = float(companies["Revenue_P0"].sum())
     household_income = float(households["Gross_Monthly_Income"].sum())
     if not np.isclose(company_revenue, period0_gdp, atol=0.01):
@@ -45,7 +59,27 @@ def main():
     if not np.isclose(household_income, period0_gdp, atol=0.01):
         raise RuntimeError("Household income does not reconcile to GDP")
 
-    monthly, yearly = simulate(products, companies, production, years, annual_inflation, price_noise, tax_rate, n_households, n_companies, rng)
+    monthly, yearly, basket_calibration, company_events, product_monthly = simulate(
+        products=products,
+        households=households,
+        companies=companies,
+        production=production,
+        classes=cfg["classes"],
+        basket_preferences=cfg["baskets"],
+        years=years,
+        annual_inflation=annual_inflation,
+        price_noise=price_noise,
+        tax_rate=tax_rate,
+        demographic_growth=demographic_growth,
+        company_growth_sensitivity=company_growth_sensitivity,
+        allow_company_exits=allow_company_exits,
+        price_adjustment_speed=price_adjustment_speed,
+        production_adjustment_speed=production_adjustment_speed,
+        max_monthly_price_change=max_monthly_price_change,
+        max_monthly_production_change=max_monthly_production_change,
+        initial_inventory_months=initial_inventory_months,
+        rng=rng,
+    )
 
     out = save_outputs(
         OUTPUT,
@@ -55,6 +89,9 @@ def main():
         companies=companies,
         products=products,
         production=production,
+        basket_calibration=basket_calibration,
+        company_events=company_events,
+        product_monthly=product_monthly,
     )
 
     class_order = cfg["classes"]["Class"].astype(str).tolist()
@@ -66,23 +103,22 @@ def main():
     ).reindex(class_order)
     summary["Income_Share"] /= period0_gdp
 
-    print("\n" + "=" * 88)
-    print("ECONOMIC SIMULATION — PHASE 0")
-    print("=" * 88)
-    print(f"Products/services            : {len(products):,}")
-    print(f"Households                   : {len(households):,}")
-    print(f"Companies                    : {len(companies):,}")
-    print(f"Active companies             : {(companies['Status'] == 'Active').sum():,}")
-    print(f"Period-0 monthly GDP         : {money(period0_gdp)}")
-    print(f"Period-0 annualized GDP      : {money(period0_gdp * 12)}")
-    print(f"Target Gini                  : {target_gini:.3f}")
-    print(f"Generated Gini               : {gini(households['Gross_Monthly_Income']):.3f}")
-    print(f"Tax rate                     : {tax_rate:.2%}")
-    print(f"Interest rate (stored)       : {interest_rate:.2%}")
-    print(f"Inflation target             : {annual_inflation:.2%}")
-    print(f"Simulation                   : {years} years / {years*12} months")
+    print("\n" + "=" * 100)
+    print("ECONOMIC SIMULATION — PHASE 1: HOUSEHOLD DEMAND + SUPPLY/DEMAND EQUILIBRIUM")
+    print("=" * 100)
+    print(f"Products/services               : {len(products):,}")
+    print(f"Starting households             : {len(households):,}")
+    print(f"Starting companies              : {len(companies):,}")
+    print(f"Period-0 monthly GDP            : {money(period0_gdp)}")
+    print(f"Period-0 annualized GDP         : {money(period0_gdp * 12)}")
+    print(f"Target / generated Gini         : {target_gini:.3f} / {gini(households['Gross_Monthly_Income']):.3f}")
+    print(f"Annual household growth         : {demographic_growth:.2%}")
+    print(f"Company growth sensitivity      : {company_growth_sensitivity:.2f}x real GDP growth")
+    print(f"Background inflation            : {annual_inflation:.2%}")
+    print(f"Interest rate (stored)          : {interest_rate:.2%}")
+    print(f"Simulation                      : {years} years / {years * 12} months")
 
-    print("\nHOUSEHOLD CLASS SUMMARY")
+    print("\nHOUSEHOLD CLASS SUMMARY — PERIOD 0")
     print(summary.to_string(formatters={
         "Avg_Monthly_Income": lambda x: f"${x:,.0f}",
         "Income_Share": lambda x: f"{x:.1%}",
@@ -90,13 +126,25 @@ def main():
     }))
 
     print("\nYEARLY MACRO SUMMARY")
-    print(yearly[["Year", "Nominal_GDP_Annualized", "Nominal_GDP_Growth_YoY", "Inflation_YoY", "Household_Count", "Company_Count"]].to_string(index=False, formatters={
-        "Nominal_GDP_Annualized": lambda x: f"${x:,.0f}",
+    print(yearly[[
+        "Year", "Nominal_GDP", "Nominal_GDP_Growth_YoY", "Real_GDP_Growth_YoY",
+        "Inflation_YoY", "Household_Count_End", "Company_Count_End",
+        "Average_Shortage_Product_Share"
+    ]].to_string(index=False, formatters={
+        "Nominal_GDP": lambda x: f"${x:,.0f}",
         "Nominal_GDP_Growth_YoY": lambda x: f"{x:.2%}",
+        "Real_GDP_Growth_YoY": lambda x: f"{x:.2%}",
         "Inflation_YoY": lambda x: f"{x:.2%}",
+        "Average_Shortage_Product_Share": lambda x: f"{x:.1%}",
     }))
+
+    print("\nCOMPANY ENTRY / EXIT EVENTS")
+    print(company_events.to_string(index=False, formatters={
+        "Prior_Year_Real_GDP_Growth": lambda x: f"{x:.2%}",
+    }))
+
     print(f"\nDetailed output: {out}")
-    print("=" * 88)
+    print("=" * 100)
 
 
 if __name__ == "__main__":
