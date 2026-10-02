@@ -1,75 +1,91 @@
-# Agent-Based Economic Simulation
+# EconomicSimulation — Phase 0
 
-Python simulation of households, firms, COICOP consumption divisions, prices, GDP, inequality, economic shocks, productivity, demographics, product evolution, and market structure.
+A PyCharm-ready starting point for an agent-based economic simulation using the supplied product list.
 
-## V3.1 market mechanics
+## Starting accounting identity
 
-The engine does not set supply equal to demand. Each month:
+At Period 0 the project enforces:
 
-1. Household income grows by source: labor income follows inflation plus productivity, transfers are indexed to inflation, and capital income receives a larger productivity-linked return.
-2. Household budgets generate desired **real quantities**. Price elasticity is applied directly to quantity, avoiding a double price adjustment.
-3. Firm productivity rises over time, increasing effective production capacity and lowering unit production cost.
-4. Firms produce from lagged expected demand, subject to effective production capacity.
-5. Firms carry inventory between months.
-6. Household orders are allocated to firms by configured market share.
-7. Sales are limited by available inventory; unfilled orders become shortages.
-8. Firms calculate revenue, cost, profit, investment, and capacity expansion.
-9. Prices react to shortages, excess inventory, the baseline inflation target, subsidies, and cost shocks.
-10. CPI, consumption, investment, government spending, GDP, Gini, productivity, and shortage rates are recorded.
-11. Population grows annually even when product-catalogue evolution is disabled.
+**GDP = total product value = total producer revenue = total household gross income**
 
-This creates genuine supply-demand imbalance and lets long-run real growth emerge from productivity, household income growth, and demographics.
+With the default **tax = transfer = savings = 0**, household **consumption = income = GDP**.
 
-## Baseline growth parameters
+## Included databases
 
-These are editable in `simulation_config.xlsx` on the `household_config` sheet:
+- `products`: 477 products/services from `Product_List.xlsx`, plus quantity, price, elasticity and market structure.
+- `households`: Low, Middle, High, Top 1%, Top 0.1%; income distribution calibrated to the chosen Gini.
+- `companies`: Private/Public and Small/Middle/Big producers with revenue, fixed costs, variable costs, profit, margin, investment.
+- `production`: many-to-many link between companies and products.
+- `monthly_macro`: GDP, GDP growth, CPI/inflation, household/company counts, household consumption, producer profit.
+- `yearly_summary`: one row per simulated year.
 
-- `inflation_target_annual` — default `0.02` (2.0%)
-- `productivity_growth_rate` — default `0.015` (1.5%)
-- `population_growth_rate` — default `0.01` (1.0%)
-- `capital_productivity_multiplier` — default `1.50`
+## Run in PyCharm
 
-With the default seed and a 36-month run without catalogue evolution, the model produces approximately 2% annual inflation and positive baseline real-GDP growth. Exact results depend on configuration and random seed.
-
-## Setup
+1. Open this folder as a PyCharm project.
+2. Select Python 3.11+.
+3. In the terminal run:
 
 ```bash
 pip install -r requirements.txt
-python build_goods_db.py
-python simulate.py --ticks 120
-python plot_results.py --results results/history.csv --out results/charts.png
 ```
 
-Or run the convenience launcher:
+4. Edit `data/Simulation_Settings.xlsx`.
+5. Run `main.py`.
+6. Review `output/Simulation_Output.xlsx` and the CSV files.
 
-```bash
-python main.py --ticks 120
-```
+## Editable settings workbook
 
-## Shock example
+### General_Settings
+Defaults requested for the starting model:
 
-A 30% Transport supply shock beginning in month 13 for six months:
+- Gini = 30%
+- Taxes = 0%
+- Interest rate = 0%
+- Inflation = 2%
+- Households = 1,000
+- Companies = 1,000
+- Simulation = 10 years
 
-```bash
-python simulate.py --ticks 36 --compare-shock "07,supply,-0.30,13,6" --no-evolution
-python plot_results.py --compare results/baseline.csv results/shock.csv --labels Baseline Shock --out results/charts_compare.png
-```
+### Household_Classes
+Default percentile groups:
 
-In the default validation run, the transport shock creates a temporary real shortage, raises CPI relative to baseline, and lowers real GDP relative to baseline.
+- Low = bottom 40%
+- Middle = 40–80%
+- High = 80–99%
+- Top 1% = 99–99.9%
+- Top 0.1% = top 0.1%
 
-## Main files
+The class counts come from these shares. The chosen Gini changes the average income and income share of each group.
 
-- `household_model.py` — income brackets, source-specific income shares, consumption behavior, Gini and population evolution
-- `producer_model.py` — firms, market structures, productivity, production capacity, inventory, profit and investment
-- `market.py` — monthly supply-demand matching, income dynamics, price formation, CPI and GDP accounting
-- `product_evolution.py` — annual catalogue evolution
-- `build_goods_db.py` — builds the product database from `Product_List.xlsx`
-- `simulation_config.xlsx` — simulation parameters
-- `plot_results.py` — dashboards and scenario comparison
+### Company_Settings
+Defaults:
 
-## Notes
+- Size mix: 70% Small, 25% Middle, 5% Big
+- Ownership: 90% Private, 10% Public
+- Markets: 70% Competitive, 25% Oligopoly, 5% Monopoly
+- Competitive: 8–20 firms per product
+- Oligopoly: 3–4 firms
+- Monopoly: 1 firm
 
-- The product catalogue `P × Q` value is an annual reference value and is not identical to simulated GDP (`C + I + G`).
-- Division quantities are calibrated to normalized COICOP expenditure weights so random product quantities do not make expensive sectors dominate the starting economy.
-- `--no-evolution` disables product-catalogue mutation only; demographic growth and productivity continue.
-- Firm market shares currently determine order allocation. A natural next extension is endogenous consumer choice based on firm price and quality.
+### Quantity_Limits
+Each product category has an editable minimum and maximum monthly quantity. The Period-0 quantity of each product is random inside that interval.
+
+## Phase 0 dynamics
+
+- Quantities are fixed after Period 0.
+- Each month product prices change around `annual inflation / 12`.
+- The cross-product median price change is targeted to `inflation / 12`.
+- Random dispersion allows individual prices to rise faster/slower and occasionally fall.
+- Product absolute demand elasticity is random from 0 to 1, but is not yet used.
+- Real GDP growth is 0% because quantities are fixed; nominal GDP changes with prices.
+
+## Good Phase 1 additions
+
+1. Household consumption baskets by income class.
+2. Elasticity-driven demand when relative prices change.
+3. Inventories, shortages and unsold goods.
+4. Company hiring/wages and unemployment.
+5. Company investment and entry/exit.
+6. Government taxes, transfers and spending.
+7. Interest rate effects on saving, credit and investment.
+8. Endogenous GDP growth and inflation instead of exogenous price drift.
