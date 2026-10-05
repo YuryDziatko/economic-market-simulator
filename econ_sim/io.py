@@ -105,7 +105,7 @@ def save_outputs(output_dir: Path, **frames):
         preferred = [
             "yearly_summary", "monthly_macro", "households", "companies",
             "products", "production", "basket_calibration", "company_events",
-            "product_monthly"
+            "market_events", "product_monthly"
         ]
         for name in preferred:
             if name in frames:

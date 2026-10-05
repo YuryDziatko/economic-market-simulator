@@ -87,3 +87,17 @@ Main outputs are written to `output/`, including:
 - `company_events.csv`
 - `basket_calibration.csv`
 - `Simulation_Output_Phase1.xlsx`
+
+## Phase 1.1 — Intelligent company entry / exit
+
+At the beginning of each year after Year 1, the economy-wide number of potential entrants is still determined by prior-year **real GDP growth × company growth sensitivity**. Those entrants are now allocated to specific product markets using three prior-year signals:
+
+- persistent shortage / unmet demand,
+- product demand growth,
+- operating-profit margin proxy.
+
+If recession-driven exits are enabled, exits are allocated to markets with excess inventory, falling demand, and losses. A product is never allowed to fall below one producer.
+
+Entry and exit now affect real production capacity. An entrant adds a configurable share of average incumbent capacity; an exit removes a configurable share. Product market structure is reclassified dynamically: 1 firm = Monopoly, 2–4 = Oligopoly, 5+ = Competitive.
+
+Detailed annual allocation is written to `output/market_events.csv` and to the `market_events` sheet in the output workbook. `product_monthly` now also includes `Firm_Count`, the evolving market structure, and a product-level operating-profit proxy.
