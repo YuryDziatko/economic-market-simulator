@@ -101,3 +101,36 @@ If recession-driven exits are enabled, exits are allocated to markets with exces
 Entry and exit now affect real production capacity. An entrant adds a configurable share of average incumbent capacity; an exit removes a configurable share. Product market structure is reclassified dynamically: 1 firm = Monopoly, 2–4 = Oligopoly, 5+ = Competitive.
 
 Detailed annual allocation is written to `output/market_events.csv` and to the `market_events` sheet in the output workbook. `product_monthly` now also includes `Firm_Count`, the evolving market structure, and a product-level operating-profit proxy.
+
+
+## Phase 1.2 — Monthly product innovation
+
+The original `data/Product_List.xlsx` remains the seed database and is never modified.
+At the start of each month, every eligible product has an editable probability (default 2%) of launching one new variant. Variant names always use the original root product name plus launch month/year/serial/generation, so recursive innovation does not create unreadably long names.
+
+Example:
+
+- Parent: `Beer | Corona Extra | 12pk Bottles | $18.99`
+- Variant: `Beer | Corona Extra_M03_Y02_0127_G1 | 12pk Bottles | random launch price`
+
+A variant inherits the parent's COICOP code, division, category, unit and approximately its elasticity. To keep the model closed, the launch initially transfers a configurable share of the parent's baseline demand and production rather than creating new spending or productive capacity from nothing. After launch, it behaves like any other product: its price, demand, production, inventory and firm count evolve normally.
+
+New settings in `General_Settings` include:
+
+- `product_innovation_chance` — default 2% per eligible product per month
+- `innovation_demand_share` — default 10% of parent baseline spending
+- `innovation_output_share` — default 10% of parent output/inventory
+- launch price range — default 85% to 115% of the parent's current price
+- elasticity variation — default 0.05 standard deviation
+- initial firms — default 1
+- optional monthly launch cap
+- whether newly created variants can themselves innovate later
+
+The run writes:
+
+- `output/Product_List_Seed_Copy.xlsx` — untouched copy of the starting product workbook
+- `output/Product_List_Simulation.xlsx` — final dynamic product database plus launch-event log
+- `output/product_events.csv` — every product launch with parent, date, price and transferred shares
+- `output/products_final.csv` — final product state
+
+**Compounding note:** with a 2% monthly probability and `new_products_can_innovate = 1`, product variety compounds. Starting from 477 products, a 10-year run can reasonably reach several thousand products. Set `new_products_can_innovate = 0` or use `max_new_products_per_month` if you want slower growth.

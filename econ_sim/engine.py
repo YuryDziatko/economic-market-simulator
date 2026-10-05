@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 from .demand import calibrate_baseline_spending, monthly_class_product_demand
+from .product_dynamics import launch_product_variants
 from .firm_dynamics import (
     allocate_market_changes,
     classify_market,
@@ -43,6 +44,15 @@ def simulate(
     exit_capacity_share: float,
     min_entry_score: float,
     min_exit_score: float,
+    product_innovation_chance: float,
+    innovation_demand_share: float,
+    innovation_output_share: float,
+    innovation_price_min_multiplier: float,
+    innovation_price_max_multiplier: float,
+    innovation_elasticity_noise: float,
+    innovation_initial_firms: int,
+    max_new_products_per_month: int,
+    new_products_can_innovate: bool,
     rng: np.random.Generator,
 ):
     months = int(years) * 12
@@ -54,12 +64,25 @@ def simulate(
         products, households, basket_preferences, class_order
     )
 
-    product_ids = products["Product_ID"].astype(str).to_numpy()
+    product_meta = products.copy().reset_index(drop=True)
+    product_meta["Root_Product"] = product_meta["Product"].astype(str)
+    product_meta["Parent_Product_ID"] = ""
+    product_meta["Created_Period_Month"] = 0
+    product_meta["Created_Year"] = 0
+    product_meta["Created_Month"] = 0
+    product_meta["Is_Innovation"] = False
+    product_meta["Generation"] = 0
+    product_meta["Launch_Price"] = product_meta["Base_Price"].astype(float)
+
+    product_ids = product_meta["Product_ID"].astype(str).to_numpy()
     base_prices = products["Base_Price"].to_numpy(float)
     base_output = products["Quantity_P0"].to_numpy(float)
     elasticities = products["Elasticity_Abs"].to_numpy(float)
 
     current_prices = base_prices.copy()
+    demand_ref_prices = base_prices.copy()
+    real_base_prices = base_prices.copy()
+    cpi_ref_prices = base_prices.copy()
     current_production = base_output.copy()
     inventory = base_output * float(initial_inventory_months)
 
@@ -76,6 +99,8 @@ def simulate(
     base_gdp_monthly = float(np.sum(base_prices * base_output))
     if base_gdp_monthly <= 0:
         raise ValueError("Period-0 GDP is zero")
+    cpi_weights = (base_prices * base_output) / base_gdp_monthly
+    next_variant_number = 1
 
     base_class_budget = (
         households.groupby("Class", observed=True)["Consumption"].sum()
@@ -94,6 +119,7 @@ def simulate(
     monthly_rows: list[dict] = []
     product_rows: list[dict] = []
     market_event_rows: list[dict] = []
+    product_event_rows: list[dict] = []
     company_events = [{
         "Year": 0,
         "Event": "Initial",
@@ -129,6 +155,8 @@ def simulate(
         "Monopoly_Products": int(np.sum(market_structure == "Monopoly")),
         "Oligopoly_Products": int(np.sum(market_structure == "Oligopoly")),
         "Competitive_Products": int(np.sum(market_structure == "Competitive")),
+        "Product_Count": len(product_meta),
+        "New_Products_This_Month": 0,
     })
 
     cpi_history = [100.0]
@@ -161,6 +189,7 @@ def simulate(
             else:
                 requested_change = 0
 
+            product_ids = product_meta["Product_ID"].astype(str).to_numpy()
             metrics = prior_year_market_metrics(
                 product_rows, year - 1, product_ids
             )
@@ -238,6 +267,48 @@ def simulate(
                 "Prior_Year_Real_GDP_Growth": prior_year_real_growth,
             })
 
+        # Monthly product innovation. New variants inherit their parent's category/unit,
+        # but receive a new name and launch price. Demand, production, inventory and CPI
+        # weight are split from the parent so product creation itself does not manufacture
+        # demand, output, or inflation from nothing.
+        (
+            product_meta, baseline_qty, current_prices, demand_ref_prices,
+            real_base_prices, cpi_ref_prices, cpi_weights, current_production,
+            inventory, elasticities, firm_counts, market_structure,
+            innovation_events, next_variant_number,
+        ) = launch_product_variants(
+            product_meta=product_meta,
+            baseline_qty=baseline_qty,
+            current_prices=current_prices,
+            demand_ref_prices=demand_ref_prices,
+            real_base_prices=real_base_prices,
+            cpi_ref_prices=cpi_ref_prices,
+            cpi_weights=cpi_weights,
+            current_production=current_production,
+            inventory=inventory,
+            elasticities=elasticities,
+            firm_counts=firm_counts,
+            market_structure=market_structure,
+            innovation_chance=product_innovation_chance,
+            innovation_demand_share=innovation_demand_share,
+            innovation_output_share=innovation_output_share,
+            innovation_price_min_multiplier=innovation_price_min_multiplier,
+            innovation_price_max_multiplier=innovation_price_max_multiplier,
+            innovation_elasticity_noise=innovation_elasticity_noise,
+            innovation_initial_firms=innovation_initial_firms,
+            max_new_products_per_month=max_new_products_per_month,
+            new_products_can_innovate=new_products_can_innovate,
+            year=year,
+            month_in_year=month_in_year,
+            period_month=t,
+            rng=rng,
+            next_variant_number=next_variant_number,
+        )
+        if not innovation_events.empty:
+            product_event_rows.extend(innovation_events.to_dict("records"))
+        new_products_this_month = len(innovation_events)
+        product_ids = product_meta["Product_ID"].astype(str).to_numpy()
+
         household_factor = current_households / initial_households
         prior_cpi_factor = cpi_history[-1] / 100.0
         class_budgets = base_class_budget * household_factor * prior_cpi_factor
@@ -245,7 +316,7 @@ def simulate(
         demand_by_class, planned_spending = monthly_class_product_demand(
             baseline_qty=baseline_qty,
             current_prices=current_prices,
-            base_prices=base_prices,
+            base_prices=demand_ref_prices,
             elasticities=elasticities,
             class_budgets=class_budgets,
             household_factor=household_factor,
@@ -264,8 +335,11 @@ def simulate(
         sales_value = sales * current_prices
         production_value = current_production * current_prices
         nominal_gdp = float(np.sum(production_value))
-        real_gdp = float(np.sum(current_production * base_prices))
-        cpi = float(np.sum(current_prices * base_output) / base_gdp_monthly * 100.0)
+        real_gdp = float(np.sum(current_production * real_base_prices))
+        price_relatives = np.divide(
+            current_prices, cpi_ref_prices, out=np.ones_like(current_prices), where=cpi_ref_prices > 0
+        )
+        cpi = float(100.0 * np.sum(cpi_weights * price_relatives))
         inflation_mom = cpi / cpi_history[-1] - 1.0
         inflation_12m = (
             cpi / cpi_history[t - 12] - 1.0
@@ -326,7 +400,16 @@ def simulate(
             "Monopoly_Products": int(np.sum(market_structure == "Monopoly")),
             "Oligopoly_Products": int(np.sum(market_structure == "Oligopoly")),
             "Competitive_Products": int(np.sum(market_structure == "Competitive")),
+            "Product_Count": len(product_meta),
+            "New_Products_This_Month": int(new_products_this_month),
         })
+
+        meta_product = product_meta["Product"].to_numpy(object)
+        meta_category = product_meta["Category"].to_numpy(object)
+        meta_division = product_meta["Division"].to_numpy(object)
+        meta_parent = product_meta["Parent_Product_ID"].to_numpy(object)
+        meta_generation = product_meta["Generation"].to_numpy(int)
+        meta_created_period = product_meta["Created_Period_Month"].to_numpy(int)
 
         for i, pid in enumerate(product_ids):
             product_rows.append({
@@ -334,6 +417,12 @@ def simulate(
                 "Year": year,
                 "Month_in_Year": month_in_year,
                 "Product_ID": pid,
+                "Product": meta_product[i],
+                "Category": meta_category[i],
+                "Division": meta_division[i],
+                "Parent_Product_ID": meta_parent[i],
+                "Generation": int(meta_generation[i]),
+                "Created_Period_Month": int(meta_created_period[i]),
                 "Price": current_prices[i],
                 "Demand": demand[i],
                 "Production": current_production[i],
@@ -402,6 +491,18 @@ def simulate(
     product_monthly = pd.DataFrame(product_rows)
     company_events_df = pd.DataFrame(company_events)
     market_events_df = pd.DataFrame(market_event_rows)
+    product_events_df = pd.DataFrame(product_event_rows)
+
+    products_final = product_meta.copy()
+    products_final["Current_Price"] = current_prices
+    products_final["Demand_Reference_Price"] = demand_ref_prices
+    products_final["Real_Base_Price"] = real_base_prices
+    products_final["Current_Production"] = current_production
+    products_final["Inventory_End"] = inventory
+    products_final["Elasticity_Abs"] = elasticities
+    products_final["Number_of_Firms"] = firm_counts
+    products_final["Market_Structure"] = market_structure
+    products_final["CPI_Weight"] = cpi_weights
 
     yearly_rows = []
     for year in range(1, years + 1):
@@ -442,6 +543,8 @@ def simulate(
             "Monopoly_Products_End": int(end["Monopoly_Products"]),
             "Oligopoly_Products_End": int(end["Oligopoly_Products"]),
             "Competitive_Products_End": int(end["Competitive_Products"]),
+            "Product_Count_End": int(end["Product_Count"]),
+            "New_Products_Created": int(y["New_Products_This_Month"].sum()),
         })
 
     return (
@@ -451,4 +554,6 @@ def simulate(
         company_events_df,
         market_events_df,
         product_monthly,
+        products_final,
+        product_events_df,
     )

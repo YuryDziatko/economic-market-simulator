@@ -19,8 +19,21 @@ def prior_year_market_metrics(
     prior_year: int,
     product_ids: np.ndarray,
 ) -> pd.DataFrame:
-    """Create product-level signals used for annual entry/exit decisions."""
+    """Create product-level signals used for annual entry/exit decisions.
+
+    This vectorized implementation matters once product innovation creates thousands
+    of products. It avoids repeatedly filtering the entire history once per product.
+    """
     hist = pd.DataFrame(product_history)
+    if hist.empty or "Year" not in hist.columns:
+        return pd.DataFrame({
+            "Product_ID": product_ids,
+            "Shortage_Rate": 0.0,
+            "Demand_Growth": 0.0,
+            "Profit_Margin": 0.0,
+            "Inventory_Months": 0.0,
+        })
+
     hist = hist[hist["Year"] == prior_year].copy()
     if hist.empty:
         return pd.DataFrame({
@@ -31,34 +44,34 @@ def prior_year_market_metrics(
             "Inventory_Months": 0.0,
         })
 
-    rows = []
-    for pid in product_ids:
-        p = hist[hist["Product_ID"] == pid].sort_values("Month_in_Year")
-        if p.empty:
-            rows.append((pid, 0.0, 0.0, 0.0, 0.0))
-            continue
+    hist = hist.sort_values(["Product_ID", "Month_in_Year"])
+    g = hist.groupby("Product_ID", sort=False)
 
-        demand_total = float(p["Demand"].sum())
-        unmet_total = float(p["Unmet_Demand"].sum())
-        shortage_rate = unmet_total / max(demand_total, 1e-9)
+    agg = g.agg(
+        Demand_Total=("Demand", "sum"),
+        Unmet_Total=("Unmet_Demand", "sum"),
+        Revenue=("Sales_Value", "sum"),
+        Profit=("Operating_Profit_Proxy", "sum"),
+        Months=("Month_in_Year", "size"),
+    )
 
-        first_q = float(p.head(min(3, len(p)))["Demand"].mean())
-        last_q = float(p.tail(min(3, len(p)))["Demand"].mean())
-        demand_growth = last_q / max(first_q, 1e-9) - 1.0
+    first3 = hist.groupby("Product_ID", sort=False).head(3).groupby("Product_ID")["Demand"].mean()
+    last3 = hist.groupby("Product_ID", sort=False).tail(3).groupby("Product_ID")["Demand"].mean()
+    ending_inventory = (
+        hist.groupby("Product_ID", sort=False).tail(1)
+        .set_index("Product_ID")["Inventory_End"]
+    )
 
-        revenue = float(p["Sales_Value"].sum())
-        profit = float(p["Operating_Profit_Proxy"].sum())
-        profit_margin = profit / max(revenue, 1e-9)
+    agg["Shortage_Rate"] = agg["Unmet_Total"] / agg["Demand_Total"].clip(lower=1e-9)
+    agg["Demand_Growth"] = last3 / first3.clip(lower=1e-9) - 1.0
+    agg["Profit_Margin"] = agg["Profit"] / agg["Revenue"].clip(lower=1e-9)
+    avg_monthly_demand = agg["Demand_Total"] / agg["Months"].clip(lower=1)
+    agg["Inventory_Months"] = ending_inventory / avg_monthly_demand.clip(lower=1e-9)
 
-        avg_monthly_demand = demand_total / max(len(p), 1)
-        ending_inventory = float(p.iloc[-1]["Inventory_End"])
-        inventory_months = ending_inventory / max(avg_monthly_demand, 1e-9)
-
-        rows.append((pid, shortage_rate, demand_growth, profit_margin, inventory_months))
-
-    return pd.DataFrame(rows, columns=[
-        "Product_ID", "Shortage_Rate", "Demand_Growth", "Profit_Margin", "Inventory_Months"
-    ])
+    result = agg[["Shortage_Rate", "Demand_Growth", "Profit_Margin", "Inventory_Months"]].reindex(product_ids)
+    result = result.replace([np.inf, -np.inf], 0.0).fillna(0.0).reset_index()
+    result = result.rename(columns={"index": "Product_ID"})
+    return result
 
 
 def score_markets(

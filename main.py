@@ -1,4 +1,5 @@
 from pathlib import Path
+import shutil
 import numpy as np
 
 from econ_sim.io import load_settings, load_products, save_outputs
@@ -52,7 +53,20 @@ def main():
     min_entry_score = float(g["min_entry_score"])
     min_exit_score = float(g["min_exit_score"])
 
+    product_innovation_chance = float(g["product_innovation_chance"])
+    innovation_demand_share = float(g["innovation_demand_share"])
+    innovation_output_share = float(g["innovation_output_share"])
+    innovation_price_min_multiplier = float(g["innovation_price_min_multiplier"])
+    innovation_price_max_multiplier = float(g["innovation_price_max_multiplier"])
+    innovation_elasticity_noise = float(g["innovation_elasticity_noise"])
+    innovation_initial_firms = int(g["innovation_initial_firms"])
+    max_new_products_per_month = int(g["max_new_products_per_month"])
+    new_products_can_innovate = bool(int(g["new_products_can_innovate"]))
+
     rng = np.random.default_rng(seed)
+
+    OUTPUT.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(DATA / "Product_List.xlsx", OUTPUT / "Product_List_Seed_Copy.xlsx")
 
     products = load_products(DATA / "Product_List.xlsx")
     products = prepare_products(products, cfg["quantity"], cfg["markets"], rng)
@@ -72,7 +86,10 @@ def main():
     if not np.isclose(household_income, period0_gdp, atol=0.01):
         raise RuntimeError("Household income does not reconcile to GDP")
 
-    monthly, yearly, basket_calibration, company_events, market_events, product_monthly = simulate(
+    (
+        monthly, yearly, basket_calibration, company_events, market_events,
+        product_monthly, products_final, product_events,
+    ) = simulate(
         products=products,
         households=households,
         companies=companies,
@@ -103,6 +120,15 @@ def main():
         exit_capacity_share=exit_capacity_share,
         min_entry_score=min_entry_score,
         min_exit_score=min_exit_score,
+        product_innovation_chance=product_innovation_chance,
+        innovation_demand_share=innovation_demand_share,
+        innovation_output_share=innovation_output_share,
+        innovation_price_min_multiplier=innovation_price_min_multiplier,
+        innovation_price_max_multiplier=innovation_price_max_multiplier,
+        innovation_elasticity_noise=innovation_elasticity_noise,
+        innovation_initial_firms=innovation_initial_firms,
+        max_new_products_per_month=max_new_products_per_month,
+        new_products_can_innovate=new_products_can_innovate,
         rng=rng,
     )
 
@@ -112,7 +138,9 @@ def main():
         monthly_macro=monthly,
         households=households,
         companies=companies,
-        products=products,
+        products_seed=products,
+        products_final=products_final,
+        product_events=product_events,
         production=production,
         basket_calibration=basket_calibration,
         company_events=company_events,
@@ -132,7 +160,9 @@ def main():
     print("\n" + "=" * 100)
     print("ECONOMIC SIMULATION — PHASE 1: HOUSEHOLD DEMAND + SUPPLY/DEMAND EQUILIBRIUM")
     print("=" * 100)
-    print(f"Products/services               : {len(products):,}")
+    print(f"Starting products/services      : {len(products):,}")
+    print(f"Final products/services         : {len(products_final):,}")
+    print(f"New products created            : {len(product_events):,}")
     print(f"Starting households             : {len(households):,}")
     print(f"Starting companies              : {len(companies):,}")
     print(f"Period-0 monthly GDP            : {money(period0_gdp)}")
@@ -141,6 +171,7 @@ def main():
     print(f"Annual household growth         : {demographic_growth:.2%}")
     print(f"Company growth sensitivity      : {company_growth_sensitivity:.2f}x real GDP growth")
     print(f"Background inflation            : {annual_inflation:.2%}")
+    print(f"Monthly product innovation      : {product_innovation_chance:.2%} per eligible product")
     print(f"Interest rate (stored)          : {interest_rate:.2%}")
     print(f"Simulation                      : {years} years / {years * 12} months")
 
@@ -156,7 +187,8 @@ def main():
         "Year", "Nominal_GDP", "Nominal_GDP_Growth_YoY", "Real_GDP_Growth_YoY",
         "Inflation_YoY", "Household_Count_End", "Company_Count_End",
         "Average_Shortage_Product_Share", "Monopoly_Products_End",
-        "Oligopoly_Products_End", "Competitive_Products_End"
+        "Oligopoly_Products_End", "Competitive_Products_End",
+        "Product_Count_End", "New_Products_Created"
     ]].to_string(index=False, formatters={
         "Nominal_GDP": lambda x: f"${x:,.0f}",
         "Nominal_GDP_Growth_YoY": lambda x: f"{x:.2%}",
@@ -183,7 +215,20 @@ def main():
             "Prior_Profit_Margin": lambda x: f"{x:.1%}",
         }))
 
+    if not product_events.empty:
+        print("\nRECENT PRODUCT LAUNCHES")
+        print(product_events.tail(20)[[
+            "Year", "Month_in_Year", "Parent_Product", "New_Product",
+            "Parent_Price", "Launch_Price", "Demand_Share_Transferred"
+        ]].to_string(index=False, formatters={
+            "Parent_Price": lambda x: f"${x:,.2f}",
+            "Launch_Price": lambda x: f"${x:,.2f}",
+            "Demand_Share_Transferred": lambda x: f"{x:.1%}",
+        }))
+
     print(f"\nDetailed output: {out}")
+    print(f"Seed product copy: {OUTPUT / 'Product_List_Seed_Copy.xlsx'}")
+    print(f"Dynamic product DB: {OUTPUT / 'Product_List_Simulation.xlsx'}")
     print("=" * 100)
 
 

@@ -104,10 +104,24 @@ def save_outputs(output_dir: Path, **frames):
     with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
         preferred = [
             "yearly_summary", "monthly_macro", "households", "companies",
-            "products", "production", "basket_calibration", "company_events",
-            "market_events", "product_monthly"
+            "products_seed", "products_final", "product_events", "production",
+            "basket_calibration", "company_events", "market_events"
         ]
         for name in preferred:
             if name in frames:
                 frames[name].to_excel(writer, sheet_name=name[:31], index=False)
+
+    # product_monthly can contain hundreds of thousands of rows once innovation
+    # compounds. It is always saved as CSV above, but intentionally omitted from
+    # the convenience Excel workbook to keep normal PyCharm runs fast.
+
+    # A dedicated working product database mirrors the user's idea of copying the
+    # starting Product_List and then evolving it during the simulation.
+    dynamic_path = output_dir / "Product_List_Simulation.xlsx"
+    with pd.ExcelWriter(dynamic_path, engine="openpyxl") as writer:
+        if "products_final" in frames:
+            frames["products_final"].to_excel(writer, sheet_name="Products_Final", index=False)
+        if "product_events" in frames:
+            frames["product_events"].to_excel(writer, sheet_name="Product_Events", index=False)
+
     return excel_path
