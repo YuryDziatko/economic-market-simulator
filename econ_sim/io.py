@@ -59,6 +59,18 @@ def load_settings(path: Path) -> dict:
         if (baskets[class_name] <= 0).any():
             raise ValueError("Consumption basket preference multipliers must be positive")
 
+    employment = pd.read_excel(path, sheet_name="Employment_Settings", header=3)
+    employment = employment[pd.to_numeric(employment["Order"], errors="coerce").notna()].copy()
+    employment["Order"] = employment["Order"].astype(int)
+    employment["Class"] = employment["Class"].astype(str)
+    employment = employment.sort_values("Order")
+    if employment["Class"].tolist() != class_names:
+        raise ValueError("Employment_Settings classes/order must match Household_Classes")
+    for col in ["Wage Multiplier", "Capital Income Weight", "Labor-Force Participation Multiplier"]:
+        employment[col] = pd.to_numeric(employment[col], errors="raise")
+        if (employment[col] <= 0).any():
+            raise ValueError(f"Employment_Settings {col} values must be positive")
+
     return {
         "general": general,
         "classes": classes,
@@ -67,6 +79,7 @@ def load_settings(path: Path) -> dict:
         "markets": markets,
         "quantity": quantity,
         "baskets": baskets,
+        "employment": employment,
     }
 
 
@@ -100,12 +113,12 @@ def save_outputs(output_dir: Path, **frames):
         df.to_csv(output_dir / f"{name}.csv", index=False)
 
     # This workbook is convenience output when the project is run locally in PyCharm.
-    excel_path = output_dir / "Simulation_Output_Phase1.xlsx"
+    excel_path = output_dir / "Simulation_Output_Phase2.xlsx"
     with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
         preferred = [
             "yearly_summary", "monthly_macro", "households", "companies",
             "products_seed", "products_final", "product_events", "production",
-            "basket_calibration", "company_events", "market_events"
+            "basket_calibration", "household_income_monthly", "company_events", "market_events"
         ]
         for name in preferred:
             if name in frames:

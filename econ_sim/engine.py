@@ -5,6 +5,7 @@ import pandas as pd
 
 from .demand import calibrate_baseline_spending, monthly_class_product_demand
 from .product_dynamics import launch_product_variants
+from .labor import prepare_labor_market, labor_and_income_state, next_average_wage
 from .firm_dynamics import (
     allocate_market_changes,
     classify_market,
@@ -20,6 +21,7 @@ def simulate(
     production: pd.DataFrame,
     classes: pd.DataFrame,
     basket_preferences: pd.DataFrame,
+    employment_settings: pd.DataFrame,
     years: int,
     annual_inflation: float,
     price_noise: float,
@@ -53,6 +55,16 @@ def simulate(
     innovation_initial_firms: int,
     max_new_products_per_month: int,
     new_products_can_innovate: bool,
+    labor_force_participation: float,
+    initial_unemployment_rate: float,
+    labor_income_share_p0: float,
+    labor_output_elasticity: float,
+    labor_wage_demand_elasticity: float,
+    annual_labor_productivity_growth: float,
+    wage_adjustment_speed: float,
+    wage_inflation_pass_through: float,
+    max_monthly_wage_change: float,
+    unemployment_transfer_rate: float,
     rng: np.random.Generator,
 ):
     months = int(years) * 12
@@ -109,6 +121,36 @@ def simulate(
         .to_numpy(float)
     )
 
+    labor_calibration = prepare_labor_market(
+        households=households,
+        classes=classes,
+        employment_settings=employment_settings,
+        labor_force_participation=labor_force_participation,
+        initial_unemployment_rate=initial_unemployment_rate,
+        labor_income_share_p0=labor_income_share_p0,
+        base_gdp_monthly=base_gdp_monthly,
+    )
+    current_average_wage = float(labor_calibration["base_average_wage"])
+    period0_labor, period0_class_income, _ = labor_and_income_state(
+        year=0,
+        period_month=0,
+        month_in_year=0,
+        current_households=current_households,
+        classes=classes,
+        labor_calibration=labor_calibration,
+        labor_force_participation=labor_force_participation,
+        annual_labor_productivity_growth=annual_labor_productivity_growth,
+        labor_output_elasticity=labor_output_elasticity,
+        labor_wage_demand_elasticity=labor_wage_demand_elasticity,
+        price_level=1.0,
+        base_real_output=base_gdp_monthly,
+        planned_real_output=base_gdp_monthly,
+        nominal_output=base_gdp_monthly,
+        average_wage=current_average_wage,
+        tax_rate=tax_rate,
+        unemployment_transfer_rate=unemployment_transfer_rate,
+    )
+
     fixed_cost_p0_total = float(companies["Fixed_Cost_P0"].sum())
     avg_fixed_cost_p0_per_company = fixed_cost_p0_total / max(initial_companies, 1)
     avg_variable_cost_ratio = (
@@ -120,6 +162,7 @@ def simulate(
     product_rows: list[dict] = []
     market_event_rows: list[dict] = []
     product_event_rows: list[dict] = []
+    household_income_rows: list[dict] = period0_class_income.to_dict("records")
     company_events = [{
         "Year": 0,
         "Event": "Initial",
@@ -144,7 +187,7 @@ def simulate(
         "CPI_Index": 100.0,
         "Inflation_MoM": 0.0,
         "Inflation_12M": 0.0,
-        "Planned_Consumption": float(base_class_budget.sum()),
+        "Planned_Consumption": float(period0_labor["Household_Consumption_Budget"]),
         "Realized_Consumption_Sales": base_gdp_monthly,
         "Unmet_Demand_Value": 0.0,
         "Inventory_Value": float(np.sum(inventory * base_prices)),
@@ -157,6 +200,23 @@ def simulate(
         "Competitive_Products": int(np.sum(market_structure == "Competitive")),
         "Product_Count": len(product_meta),
         "New_Products_This_Month": 0,
+        "Labor_Force": period0_labor["Labor_Force"],
+        "Employment": period0_labor["Employment"],
+        "Unemployment": period0_labor["Unemployment"],
+        "Employment_Rate": period0_labor["Employment_Rate"],
+        "Unemployment_Rate": period0_labor["Unemployment_Rate"],
+        "Average_Wage": period0_labor["Average_Wage"],
+        "Wage_Growth_MoM": 0.0,
+        "Labor_Income": period0_labor["Labor_Income"],
+        "Capital_Income": period0_labor["Capital_Income"],
+        "Household_Gross_Income": period0_labor["Household_Gross_Income"],
+        "Household_Taxes": period0_labor["Household_Taxes"],
+        "Household_Disposable_Income": period0_labor["Household_Disposable_Income"],
+        "Income_Gini_Class_Average": period0_labor["Income_Gini_Class_Average"],
+        "Labor_Productivity_Index": period0_labor["Labor_Productivity_Index"],
+        "Real_Wage_Index": period0_labor["Real_Wage_Index"],
+        "Labor_Wage_Demand_Factor": period0_labor["Labor_Wage_Demand_Factor"],
+        "Labor_Constraint_Production_Factor": 1.0,
     })
 
     cpi_history = [100.0]
@@ -310,8 +370,64 @@ def simulate(
         product_ids = product_meta["Product_ID"].astype(str).to_numpy()
 
         household_factor = current_households / initial_households
-        prior_cpi_factor = cpi_history[-1] / 100.0
-        class_budgets = base_class_budget * household_factor * prior_cpi_factor
+
+        # ---- Phase 2 labor market ----
+        # First test whether the production plan can be staffed. If labor demand
+        # exceeds the labor force, physical output is scaled before household
+        # income and product demand are calculated.
+        planned_real_pre_labor = float(np.sum(current_production * real_base_prices))
+        planned_nominal_pre_labor = float(np.sum(current_production * current_prices))
+        labor_probe, _, labor_factor = labor_and_income_state(
+            year=year,
+            period_month=t,
+            month_in_year=month_in_year,
+            current_households=current_households,
+            classes=classes,
+            labor_calibration=labor_calibration,
+            labor_force_participation=labor_force_participation,
+            annual_labor_productivity_growth=annual_labor_productivity_growth,
+            labor_output_elasticity=labor_output_elasticity,
+            labor_wage_demand_elasticity=labor_wage_demand_elasticity,
+            price_level=cpi_history[-1] / 100.0,
+            base_real_output=base_gdp_monthly,
+            planned_real_output=planned_real_pre_labor,
+            nominal_output=planned_nominal_pre_labor,
+            average_wage=current_average_wage,
+            tax_rate=tax_rate,
+            unemployment_transfer_rate=unemployment_transfer_rate,
+        )
+        desired_employment_signal = labor_probe["Desired_Employment_Pre_Constraint"]
+        if labor_factor < 1.0:
+            current_production = current_production * labor_factor
+
+        planned_real_after_labor = float(np.sum(current_production * real_base_prices))
+        planned_nominal_after_labor = float(np.sum(current_production * current_prices))
+        labor_macro, class_income_df, _ = labor_and_income_state(
+            year=year,
+            period_month=t,
+            month_in_year=month_in_year,
+            current_households=current_households,
+            classes=classes,
+            labor_calibration=labor_calibration,
+            labor_force_participation=labor_force_participation,
+            annual_labor_productivity_growth=annual_labor_productivity_growth,
+            labor_output_elasticity=labor_output_elasticity,
+            labor_wage_demand_elasticity=labor_wage_demand_elasticity,
+            price_level=cpi_history[-1] / 100.0,
+            base_real_output=base_gdp_monthly,
+            planned_real_output=planned_real_after_labor,
+            nominal_output=planned_nominal_after_labor,
+            average_wage=current_average_wage,
+            tax_rate=tax_rate,
+            unemployment_transfer_rate=unemployment_transfer_rate,
+        )
+        labor_macro["Desired_Employment_Pre_Constraint"] = desired_employment_signal
+        labor_macro["Labor_Constraint_Production_Factor"] = labor_factor
+        household_income_rows.extend(class_income_df.to_dict("records"))
+        class_budgets = (
+            class_income_df.set_index("Class")["Consumption_Budget"]
+            .reindex(class_order).fillna(0.0).to_numpy(float)
+        )
 
         demand_by_class, planned_spending = monthly_class_product_demand(
             baseline_qty=baseline_qty,
@@ -402,6 +518,23 @@ def simulate(
             "Competitive_Products": int(np.sum(market_structure == "Competitive")),
             "Product_Count": len(product_meta),
             "New_Products_This_Month": int(new_products_this_month),
+            "Labor_Force": labor_macro["Labor_Force"],
+            "Employment": labor_macro["Employment"],
+            "Unemployment": labor_macro["Unemployment"],
+            "Employment_Rate": labor_macro["Employment_Rate"],
+            "Unemployment_Rate": labor_macro["Unemployment_Rate"],
+            "Average_Wage": labor_macro["Average_Wage"],
+            "Wage_Growth_MoM": 0.0,
+            "Labor_Income": labor_macro["Labor_Income"],
+            "Capital_Income": labor_macro["Capital_Income"],
+            "Household_Gross_Income": labor_macro["Household_Gross_Income"],
+            "Household_Taxes": labor_macro["Household_Taxes"],
+            "Household_Disposable_Income": labor_macro["Household_Disposable_Income"],
+            "Income_Gini_Class_Average": labor_macro["Income_Gini_Class_Average"],
+            "Labor_Productivity_Index": labor_macro["Labor_Productivity_Index"],
+            "Real_Wage_Index": labor_macro["Real_Wage_Index"],
+            "Labor_Wage_Demand_Factor": labor_macro["Labor_Wage_Demand_Factor"],
+            "Labor_Constraint_Production_Factor": labor_macro["Labor_Constraint_Production_Factor"],
         })
 
         meta_product = product_meta["Product"].to_numpy(object)
@@ -452,6 +585,18 @@ def simulate(
         monthly_rows[-1]["Median_Product_Price_Change"] = float(np.median(price_change))
         next_prices = np.maximum(0.01, current_prices * (1.0 + price_change))
 
+        next_wage, wage_change = next_average_wage(
+            current_paid_wage=max(labor_macro["Average_Wage"], 0.01),
+            labor_force=labor_macro["Labor_Force"],
+            desired_employment_pre_constraint=labor_macro["Desired_Employment_Pre_Constraint"],
+            target_unemployment_rate=labor_calibration["target_unemployment_rate"],
+            inflation_mom=inflation_mom,
+            wage_adjustment_speed=wage_adjustment_speed,
+            wage_inflation_pass_through=wage_inflation_pass_through,
+            max_monthly_wage_change=max_monthly_wage_change,
+        )
+        monthly_rows[-1]["Wage_Growth_MoM"] = wage_change
+
         # Recalculate response speed from the current endogenous market structure.
         market_speed = np.array([
             1.00 if m == "Competitive" else 0.75 if m == "Oligopoly" else 0.50
@@ -469,6 +614,7 @@ def simulate(
         inventory = inventory_end
         current_prices = next_prices
         current_production = next_production
+        current_average_wage = next_wage
         cpi_history.append(cpi)
         prev_nominal_gdp = nominal_gdp
         prev_real_gdp = real_gdp
@@ -492,6 +638,7 @@ def simulate(
     company_events_df = pd.DataFrame(company_events)
     market_events_df = pd.DataFrame(market_event_rows)
     product_events_df = pd.DataFrame(product_event_rows)
+    household_income_monthly = pd.DataFrame(household_income_rows)
 
     products_final = product_meta.copy()
     products_final["Current_Price"] = current_prices
@@ -545,6 +692,19 @@ def simulate(
             "Competitive_Products_End": int(end["Competitive_Products"]),
             "Product_Count_End": int(end["Product_Count"]),
             "New_Products_Created": int(y["New_Products_This_Month"].sum()),
+            "Labor_Force_End": float(end["Labor_Force"]),
+            "Employment_End": float(end["Employment"]),
+            "Unemployment_Rate_End": float(end["Unemployment_Rate"]),
+            "Average_Unemployment_Rate": float(y["Unemployment_Rate"].mean()),
+            "Average_Wage_End": float(end["Average_Wage"]),
+            "Average_Wage_Annual": float(end["Average_Wage"] * 12.0),
+            "Labor_Income": float(y["Labor_Income"].sum()),
+            "Capital_Income": float(y["Capital_Income"].sum()),
+            "Household_Gross_Income": float(y["Household_Gross_Income"].sum()),
+            "Household_Disposable_Income": float(y["Household_Disposable_Income"].sum()),
+            "Income_Gini_End_Class_Average": float(end["Income_Gini_Class_Average"]),
+            "Labor_Productivity_Index_End": float(end["Labor_Productivity_Index"]),
+            "Labor_Constraint_Months": int((y["Labor_Constraint_Production_Factor"] < 0.999999).sum()),
         })
 
     return (
@@ -556,4 +716,5 @@ def simulate(
         product_monthly,
         products_final,
         product_events_df,
+        household_income_monthly,
     )

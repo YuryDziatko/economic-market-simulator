@@ -1,4 +1,4 @@
-# EconomicSimulation — Phase 1
+# EconomicSimulation — Phase 2
 
 Phase 1 turns the Phase-0 baseline into a monthly supply/demand simulation.
 
@@ -86,7 +86,7 @@ Main outputs are written to `output/`, including:
 - `product_monthly.csv`
 - `company_events.csv`
 - `basket_calibration.csv`
-- `Simulation_Output_Phase1.xlsx`
+- `Simulation_Output_Phase2.xlsx`
 
 ## Phase 1.1 — Intelligent company entry / exit
 
@@ -134,3 +134,61 @@ The run writes:
 - `output/products_final.csv` — final product state
 
 **Compounding note:** with a 2% monthly probability and `new_products_can_innovate = 1`, product variety compounds. Starting from 477 products, a 10-year run can reasonably reach several thousand products. Set `new_products_can_innovate = 0` or use `max_new_products_per_month` if you want slower growth.
+
+
+## Phase 2 — Employment, wages, and household income
+
+Phase 2 replaces the previous CPI-scaled household-budget shortcut with an explicit monthly labor/income loop.
+
+### Labor market
+
+- Labor force = households × base participation rate × class participation multiplier.
+- Period-0 employment is calibrated from the editable initial unemployment rate.
+- Desired employment rises with real production and falls with labor productivity.
+- Desired employment also responds to the **real wage**: cheaper real labor encourages hiring; expensive real labor reduces hiring.
+- If desired employment exceeds available labor, production is labor-constrained before product demand/sales are calculated.
+- Average wages adjust monthly using labor-market tightness plus partial inflation pass-through.
+
+### Household income
+
+Monthly national income is split into:
+
+1. **Labor income** = employment × average wage, allocated across classes with editable wage multipliers.
+2. **Capital/business income** = remaining nominal production income, allocated with editable capital-income weights.
+3. **Transfers** = optional unemployment transfer, default 0 until the government sector is added.
+
+Taxes are then deducted and, because savings is still 0 in Phase 2, disposable income becomes the class consumption budget. Product demand therefore feeds back through:
+
+`income → consumption demand → production → employment → wages/income`
+
+### New settings
+
+`General_Settings` now includes:
+
+- `labor_force_participation` — 65% default
+- `initial_unemployment_rate` — 4% default
+- `labor_income_share_p0` — 65% default
+- `labor_output_elasticity` — 0.90 default
+- `annual_labor_productivity_growth` — 1.5% default
+- `labor_wage_demand_elasticity` — 0.35 default
+- `wage_adjustment_speed` — 0.08 default
+- `wage_inflation_pass_through` — 0.50 default
+- `max_monthly_wage_change` — 5% default
+- `unemployment_transfer_rate` — 0% default
+
+The `Employment_Settings` sheet contains class-specific wage multipliers, capital-income weights, and labor-force participation multipliers.
+
+### New outputs
+
+- `output/household_income_monthly.csv` — monthly employment/income by class
+- labor-force, employment, unemployment, wages, labor income, capital income and income-Gini columns in `monthly_macro.csv`
+- annual employment/wage/income indicators in `yearly_summary.csv`
+- `household_income_monthly` sheet in `Simulation_Output_Phase2.xlsx`
+
+### Important Phase-2 simplifications
+
+- One household represents one worker unit for labor-market accounting.
+- Employment is allocated proportionally across each class's labor force; class wage multipliers determine pay differences.
+- Capital income is the residual national income after labor compensation. This keeps aggregate household income equal to nominal production income while government, investment and finance are not yet modeled.
+- Savings remains zero. A later investment/finance phase should split disposable income between consumption and savings.
+- The reported monthly Gini is a class-average approximation; the original Period-0 individual-household Gini is still generated exactly from the requested target.

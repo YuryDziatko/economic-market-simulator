@@ -63,6 +63,17 @@ def main():
     max_new_products_per_month = int(g["max_new_products_per_month"])
     new_products_can_innovate = bool(int(g["new_products_can_innovate"]))
 
+    labor_force_participation = float(g["labor_force_participation"])
+    initial_unemployment_rate = float(g["initial_unemployment_rate"])
+    labor_income_share_p0 = float(g["labor_income_share_p0"])
+    labor_output_elasticity = float(g["labor_output_elasticity"])
+    labor_wage_demand_elasticity = float(g["labor_wage_demand_elasticity"])
+    annual_labor_productivity_growth = float(g["annual_labor_productivity_growth"])
+    wage_adjustment_speed = float(g["wage_adjustment_speed"])
+    wage_inflation_pass_through = float(g["wage_inflation_pass_through"])
+    max_monthly_wage_change = float(g["max_monthly_wage_change"])
+    unemployment_transfer_rate = float(g["unemployment_transfer_rate"])
+
     rng = np.random.default_rng(seed)
 
     OUTPUT.mkdir(parents=True, exist_ok=True)
@@ -88,7 +99,7 @@ def main():
 
     (
         monthly, yearly, basket_calibration, company_events, market_events,
-        product_monthly, products_final, product_events,
+        product_monthly, products_final, product_events, household_income_monthly,
     ) = simulate(
         products=products,
         households=households,
@@ -96,6 +107,7 @@ def main():
         production=production,
         classes=cfg["classes"],
         basket_preferences=cfg["baskets"],
+        employment_settings=cfg["employment"],
         years=years,
         annual_inflation=annual_inflation,
         price_noise=price_noise,
@@ -129,6 +141,16 @@ def main():
         innovation_initial_firms=innovation_initial_firms,
         max_new_products_per_month=max_new_products_per_month,
         new_products_can_innovate=new_products_can_innovate,
+        labor_force_participation=labor_force_participation,
+        initial_unemployment_rate=initial_unemployment_rate,
+        labor_income_share_p0=labor_income_share_p0,
+        labor_output_elasticity=labor_output_elasticity,
+        labor_wage_demand_elasticity=labor_wage_demand_elasticity,
+        annual_labor_productivity_growth=annual_labor_productivity_growth,
+        wage_adjustment_speed=wage_adjustment_speed,
+        wage_inflation_pass_through=wage_inflation_pass_through,
+        max_monthly_wage_change=max_monthly_wage_change,
+        unemployment_transfer_rate=unemployment_transfer_rate,
         rng=rng,
     )
 
@@ -146,6 +168,7 @@ def main():
         company_events=company_events,
         market_events=market_events,
         product_monthly=product_monthly,
+        household_income_monthly=household_income_monthly,
     )
 
     class_order = cfg["classes"]["Class"].astype(str).tolist()
@@ -158,7 +181,7 @@ def main():
     summary["Income_Share"] /= period0_gdp
 
     print("\n" + "=" * 100)
-    print("ECONOMIC SIMULATION — PHASE 1: HOUSEHOLD DEMAND + SUPPLY/DEMAND EQUILIBRIUM")
+    print("ECONOMIC SIMULATION — PHASE 2: EMPLOYMENT + WAGES + HOUSEHOLD INCOME")
     print("=" * 100)
     print(f"Starting products/services      : {len(products):,}")
     print(f"Final products/services         : {len(products_final):,}")
@@ -172,6 +195,9 @@ def main():
     print(f"Company growth sensitivity      : {company_growth_sensitivity:.2f}x real GDP growth")
     print(f"Background inflation            : {annual_inflation:.2%}")
     print(f"Monthly product innovation      : {product_innovation_chance:.2%} per eligible product")
+    print(f"Labor-force participation       : {labor_force_participation:.2%}")
+    print(f"Initial unemployment target     : {initial_unemployment_rate:.2%}")
+    print(f"Annual labor productivity       : {annual_labor_productivity_growth:.2%}")
     print(f"Interest rate (stored)          : {interest_rate:.2%}")
     print(f"Simulation                      : {years} years / {years * 12} months")
 
@@ -186,15 +212,32 @@ def main():
     print(yearly[[
         "Year", "Nominal_GDP", "Nominal_GDP_Growth_YoY", "Real_GDP_Growth_YoY",
         "Inflation_YoY", "Household_Count_End", "Company_Count_End",
-        "Average_Shortage_Product_Share", "Monopoly_Products_End",
-        "Oligopoly_Products_End", "Competitive_Products_End",
+        "Unemployment_Rate_End", "Average_Wage_Annual",
+        "Income_Gini_End_Class_Average", "Average_Shortage_Product_Share",
+        "Monopoly_Products_End", "Oligopoly_Products_End", "Competitive_Products_End",
         "Product_Count_End", "New_Products_Created"
     ]].to_string(index=False, formatters={
         "Nominal_GDP": lambda x: f"${x:,.0f}",
         "Nominal_GDP_Growth_YoY": lambda x: f"{x:.2%}",
         "Real_GDP_Growth_YoY": lambda x: f"{x:.2%}",
         "Inflation_YoY": lambda x: f"{x:.2%}",
+        "Unemployment_Rate_End": lambda x: f"{x:.2%}",
+        "Average_Wage_Annual": lambda x: f"${x:,.0f}",
+        "Income_Gini_End_Class_Average": lambda x: f"{x:.3f}",
         "Average_Shortage_Product_Share": lambda x: f"{x:.1%}",
+    }))
+
+    print("\nHOUSEHOLD INCOME / EMPLOYMENT — FINAL MONTH")
+    final_income = household_income_monthly[household_income_monthly["Period_Month"] == years * 12].copy()
+    print(final_income[[
+        "Class", "Households", "Employed", "Unemployed", "Average_Wage_Employed",
+        "Labor_Income", "Capital_Income", "Average_Gross_Income_Per_Household", "Income_Share"
+    ]].to_string(index=False, formatters={
+        "Average_Wage_Employed": lambda x: f"${x:,.0f}",
+        "Labor_Income": lambda x: f"${x:,.0f}",
+        "Capital_Income": lambda x: f"${x:,.0f}",
+        "Average_Gross_Income_Per_Household": lambda x: f"${x:,.0f}",
+        "Income_Share": lambda x: f"{x:.1%}",
     }))
 
     print("\nCOMPANY ENTRY / EXIT EVENTS")
