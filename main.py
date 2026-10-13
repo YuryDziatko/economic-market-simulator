@@ -74,6 +74,14 @@ def main():
     max_monthly_wage_change = float(g["max_monthly_wage_change"])
     unemployment_transfer_rate = float(g["unemployment_transfer_rate"])
 
+    corporate_profit_tax_rate = float(g["corporate_profit_tax_rate"])
+    government_consumption_share = float(g["government_consumption_share"])
+    general_transfer_share = float(g["general_transfer_share"])
+    government_reserve_share = float(g["government_reserve_share"])
+    initial_public_debt = float(g["initial_public_debt"])
+    debt_interest_rate = float(g["debt_interest_rate"])
+    max_government_demand_growth = float(g["max_government_demand_growth"])
+
     rng = np.random.default_rng(seed)
 
     OUTPUT.mkdir(parents=True, exist_ok=True)
@@ -99,7 +107,7 @@ def main():
 
     (
         monthly, yearly, basket_calibration, company_events, market_events,
-        product_monthly, products_final, product_events, household_income_monthly,
+        product_monthly, products_final, product_events, household_income_monthly, government_monthly,
     ) = simulate(
         products=products,
         households=households,
@@ -108,6 +116,8 @@ def main():
         classes=cfg["classes"],
         basket_preferences=cfg["baskets"],
         employment_settings=cfg["employment"],
+        government_transfers=cfg["government_transfers"],
+        government_demand=cfg["government_demand"],
         years=years,
         annual_inflation=annual_inflation,
         price_noise=price_noise,
@@ -151,6 +161,13 @@ def main():
         wage_inflation_pass_through=wage_inflation_pass_through,
         max_monthly_wage_change=max_monthly_wage_change,
         unemployment_transfer_rate=unemployment_transfer_rate,
+        corporate_profit_tax_rate=corporate_profit_tax_rate,
+        government_consumption_share=government_consumption_share,
+        general_transfer_share=general_transfer_share,
+        government_reserve_share=government_reserve_share,
+        initial_public_debt=initial_public_debt,
+        debt_interest_rate=debt_interest_rate,
+        max_government_demand_growth=max_government_demand_growth,
         rng=rng,
     )
 
@@ -169,6 +186,7 @@ def main():
         market_events=market_events,
         product_monthly=product_monthly,
         household_income_monthly=household_income_monthly,
+        government_monthly=government_monthly,
     )
 
     class_order = cfg["classes"]["Class"].astype(str).tolist()
@@ -181,7 +199,7 @@ def main():
     summary["Income_Share"] /= period0_gdp
 
     print("\n" + "=" * 100)
-    print("ECONOMIC SIMULATION — PHASE 2: EMPLOYMENT + WAGES + HOUSEHOLD INCOME")
+    print("ECONOMIC SIMULATION — PHASE 3: GOVERNMENT + TAXES + TRANSFERS")
     print("=" * 100)
     print(f"Starting products/services      : {len(products):,}")
     print(f"Final products/services         : {len(products_final):,}")
@@ -198,6 +216,12 @@ def main():
     print(f"Labor-force participation       : {labor_force_participation:.2%}")
     print(f"Initial unemployment target     : {initial_unemployment_rate:.2%}")
     print(f"Annual labor productivity       : {annual_labor_productivity_growth:.2%}")
+    print(f"Household income tax            : {tax_rate:.2%}")
+    print(f"Corporate profit tax            : {corporate_profit_tax_rate:.2%}")
+    print(f"Unemployment benefit            : {unemployment_transfer_rate:.2%} of average wage")
+    print(f"Government purchases target     : {government_consumption_share:.2%} of tax revenue")
+    print(f"General transfers target        : {general_transfer_share:.2%} of tax revenue")
+    print(f"Public debt interest            : {debt_interest_rate:.2%}")
     print(f"Interest rate (stored)          : {interest_rate:.2%}")
     print(f"Simulation                      : {years} years / {years * 12} months")
 
@@ -213,7 +237,8 @@ def main():
         "Year", "Nominal_GDP", "Nominal_GDP_Growth_YoY", "Real_GDP_Growth_YoY",
         "Inflation_YoY", "Household_Count_End", "Company_Count_End",
         "Unemployment_Rate_End", "Average_Wage_Annual",
-        "Income_Gini_End_Class_Average", "Average_Shortage_Product_Share",
+        "Income_Gini_End_Class_Average", "Government_Budget_Balance", "Public_Debt_End",
+        "Debt_to_GDP_End", "Average_Shortage_Product_Share",
         "Monopoly_Products_End", "Oligopoly_Products_End", "Competitive_Products_End",
         "Product_Count_End", "New_Products_Created"
     ]].to_string(index=False, formatters={
@@ -224,6 +249,9 @@ def main():
         "Unemployment_Rate_End": lambda x: f"{x:.2%}",
         "Average_Wage_Annual": lambda x: f"${x:,.0f}",
         "Income_Gini_End_Class_Average": lambda x: f"{x:.3f}",
+        "Government_Budget_Balance": lambda x: f"${x:,.0f}",
+        "Public_Debt_End": lambda x: f"${x:,.0f}",
+        "Debt_to_GDP_End": lambda x: f"{x:.1%}",
         "Average_Shortage_Product_Share": lambda x: f"{x:.1%}",
     }))
 
@@ -231,14 +259,25 @@ def main():
     final_income = household_income_monthly[household_income_monthly["Period_Month"] == years * 12].copy()
     print(final_income[[
         "Class", "Households", "Employed", "Unemployed", "Average_Wage_Employed",
-        "Labor_Income", "Capital_Income", "Average_Gross_Income_Per_Household", "Income_Share"
+        "Labor_Income", "Capital_Income", "Transfers", "Taxes",
+        "Average_Gross_Income_Per_Household", "Income_Share"
     ]].to_string(index=False, formatters={
         "Average_Wage_Employed": lambda x: f"${x:,.0f}",
         "Labor_Income": lambda x: f"${x:,.0f}",
         "Capital_Income": lambda x: f"${x:,.0f}",
+        "Transfers": lambda x: f"${x:,.0f}",
+        "Taxes": lambda x: f"${x:,.0f}",
         "Average_Gross_Income_Per_Household": lambda x: f"${x:,.0f}",
         "Income_Share": lambda x: f"{x:.1%}",
     }))
+
+    print("\nGOVERNMENT — FINAL YEAR")
+    final_gov = yearly.iloc[-1]
+    print(f"Government revenue              : {money(final_gov['Government_Revenue'])}")
+    print(f"Government spending             : {money(final_gov['Government_Spending'])}")
+    print(f"Budget balance                  : {money(final_gov['Government_Budget_Balance'])}")
+    print(f"Public debt                     : {money(final_gov['Public_Debt_End'])}")
+    print(f"Debt / GDP                      : {final_gov['Debt_to_GDP_End']:.1%}")
 
     print("\nCOMPANY ENTRY / EXIT EVENTS")
     print(company_events.to_string(index=False, formatters={

@@ -6,6 +6,12 @@ import pandas as pd
 from .demand import calibrate_baseline_spending, monthly_class_product_demand
 from .product_dynamics import launch_product_variants
 from .labor import prepare_labor_market, labor_and_income_state, next_average_wage
+from .government import (
+    distribute_general_transfers,
+    government_product_demand,
+    fiscal_update,
+    next_government_budgets,
+)
 from .firm_dynamics import (
     allocate_market_changes,
     classify_market,
@@ -22,6 +28,8 @@ def simulate(
     classes: pd.DataFrame,
     basket_preferences: pd.DataFrame,
     employment_settings: pd.DataFrame,
+    government_transfers: pd.DataFrame,
+    government_demand: pd.DataFrame,
     years: int,
     annual_inflation: float,
     price_noise: float,
@@ -65,6 +73,13 @@ def simulate(
     wage_inflation_pass_through: float,
     max_monthly_wage_change: float,
     unemployment_transfer_rate: float,
+    corporate_profit_tax_rate: float,
+    government_consumption_share: float,
+    general_transfer_share: float,
+    government_reserve_share: float,
+    initial_public_debt: float,
+    debt_interest_rate: float,
+    max_government_demand_growth: float,
     rng: np.random.Generator,
 ):
     months = int(years) * 12
@@ -149,6 +164,8 @@ def simulate(
         average_wage=current_average_wage,
         tax_rate=tax_rate,
         unemployment_transfer_rate=unemployment_transfer_rate,
+        corporate_profit_tax_rate=corporate_profit_tax_rate,
+        general_transfers_by_class=np.zeros(len(class_order), dtype=float),
     )
 
     fixed_cost_p0_total = float(companies["Fixed_Cost_P0"].sum())
@@ -158,11 +175,20 @@ def simulate(
         if base_gdp_monthly > 0 else 0.0
     )
 
+    # Phase 3 fiscal state. Period-0 taxes seed Month-1 government budgets.
+    period0_household_tax = float(period0_labor["Household_Taxes"])
+    period0_corporate_tax = float(period0_labor["Corporate_Tax_Proxy"])
+    period0_gross_tax = period0_household_tax + period0_corporate_tax
+    current_government_purchase_budget = period0_gross_tax * float(government_consumption_share)
+    current_general_transfer_budget = period0_gross_tax * float(general_transfer_share)
+    public_debt = max(float(initial_public_debt), 0.0)
+
     monthly_rows: list[dict] = []
     product_rows: list[dict] = []
     market_event_rows: list[dict] = []
     product_event_rows: list[dict] = []
     household_income_rows: list[dict] = period0_class_income.to_dict("records")
+    government_rows: list[dict] = []
     company_events = [{
         "Year": 0,
         "Event": "Initial",
@@ -212,11 +238,36 @@ def simulate(
         "Household_Gross_Income": period0_labor["Household_Gross_Income"],
         "Household_Taxes": period0_labor["Household_Taxes"],
         "Household_Disposable_Income": period0_labor["Household_Disposable_Income"],
+        "Household_Transfers": period0_labor["Transfers"],
+        "Household_Unemployment_Transfers": period0_labor["Unemployment_Transfers"],
+        "Household_General_Transfers": period0_labor["General_Transfers"],
+        "Corporate_Tax_Revenue": period0_corporate_tax,
+        "Government_Revenue": period0_gross_tax,
+        "Government_Purchases": 0.0,
+        "Government_Purchase_Budget": current_government_purchase_budget,
+        "Government_Budget_Balance": period0_gross_tax - period0_labor["Unemployment_Transfers"],
+        "Public_Debt_End": public_debt,
         "Income_Gini_Class_Average": period0_labor["Income_Gini_Class_Average"],
         "Labor_Productivity_Index": period0_labor["Labor_Productivity_Index"],
         "Real_Wage_Index": period0_labor["Real_Wage_Index"],
         "Labor_Wage_Demand_Factor": period0_labor["Labor_Wage_Demand_Factor"],
         "Labor_Constraint_Production_Factor": 1.0,
+    })
+
+    government_rows.append({
+        "Period_Month": 0, "Year": 0, "Month_in_Year": 0,
+        "Household_Tax_Revenue": period0_household_tax,
+        "Corporate_Tax_Revenue": period0_corporate_tax,
+        "Government_Revenue": period0_gross_tax,
+        "Unemployment_Benefits": float(period0_labor["Unemployment_Transfers"]),
+        "General_Transfers": 0.0,
+        "Government_Purchase_Budget": current_government_purchase_budget,
+        "Government_Purchases": 0.0,
+        "Debt_Interest": 0.0,
+        "Government_Spending": float(period0_labor["Unemployment_Transfers"]),
+        "Government_Budget_Balance": period0_gross_tax - float(period0_labor["Unemployment_Transfers"]),
+        "Public_Debt_Begin": public_debt,
+        "Public_Debt_End": public_debt,
     })
 
     cpi_history = [100.0]
@@ -370,8 +421,11 @@ def simulate(
         product_ids = product_meta["Product_ID"].astype(str).to_numpy()
 
         household_factor = current_households / initial_households
+        general_transfers_by_class = distribute_general_transfers(
+            current_general_transfer_budget, current_households, classes, government_transfers
+        )
 
-        # ---- Phase 2 labor market ----
+        # ---- Phase 2 labor market + Phase 3 transfers ----
         # First test whether the production plan can be staffed. If labor demand
         # exceeds the labor force, physical output is scaled before household
         # income and product demand are calculated.
@@ -395,6 +449,8 @@ def simulate(
             average_wage=current_average_wage,
             tax_rate=tax_rate,
             unemployment_transfer_rate=unemployment_transfer_rate,
+            corporate_profit_tax_rate=corporate_profit_tax_rate,
+            general_transfers_by_class=general_transfers_by_class,
         )
         desired_employment_signal = labor_probe["Desired_Employment_Pre_Constraint"]
         if labor_factor < 1.0:
@@ -420,6 +476,8 @@ def simulate(
             average_wage=current_average_wage,
             tax_rate=tax_rate,
             unemployment_transfer_rate=unemployment_transfer_rate,
+            corporate_profit_tax_rate=corporate_profit_tax_rate,
+            general_transfers_by_class=general_transfers_by_class,
         )
         labor_macro["Desired_Employment_Pre_Constraint"] = desired_employment_signal
         labor_macro["Labor_Constraint_Production_Factor"] = labor_factor
@@ -437,7 +495,15 @@ def simulate(
             class_budgets=class_budgets,
             household_factor=household_factor,
         )
-        demand = demand_by_class.sum(axis=0)
+        household_demand = demand_by_class.sum(axis=0)
+        government_demand_qty, government_planned_spending = government_product_demand(
+            purchase_budget=current_government_purchase_budget,
+            product_meta=product_meta,
+            current_prices=current_prices,
+            current_production=current_production,
+            government_demand=government_demand,
+        )
+        demand = household_demand + government_demand_qty
 
         inventory_start = inventory.copy()
         available = current_production + inventory_start
@@ -449,6 +515,16 @@ def simulate(
         imbalance = (demand - available) / denom
 
         sales_value = sales * current_prices
+        household_demand_share = np.divide(
+            household_demand, np.maximum(demand, 1e-9), out=np.zeros_like(demand), where=demand > 0
+        )
+        government_demand_share = np.divide(
+            government_demand_qty, np.maximum(demand, 1e-9), out=np.zeros_like(demand), where=demand > 0
+        )
+        household_sales_value = sales_value * household_demand_share
+        government_sales_value = sales_value * government_demand_share
+        household_unmet_qty = unmet_qty * household_demand_share
+        government_unmet_qty = unmet_qty * government_demand_share
         production_value = current_production * current_prices
         nominal_gdp = float(np.sum(production_value))
         real_gdp = float(np.sum(current_production * real_base_prices))
@@ -485,10 +561,26 @@ def simulate(
         variable_cost = float(product_variable_cost.sum())
         fixed_cost = float(total_fixed_cost)
         producer_profit = float(sales_value.sum() - variable_cost - fixed_cost)
+        corporate_tax_revenue = float(labor_macro["Corporate_Tax_Proxy"])
+        household_tax_revenue = float(labor_macro["Household_Taxes"])
+        realized_government_purchases = float(government_sales_value.sum())
+        fiscal = fiscal_update(
+            household_tax_revenue=household_tax_revenue,
+            corporate_tax_revenue=corporate_tax_revenue,
+            unemployment_benefits=labor_macro["Unemployment_Transfers"],
+            general_transfers=labor_macro["General_Transfers"],
+            realized_government_purchases=realized_government_purchases,
+            public_debt_begin=public_debt,
+            annual_debt_interest_rate=debt_interest_rate,
+        )
+        public_debt = fiscal["Public_Debt_End"]
 
         planned_total = float(planned_spending.sum())
-        realized_consumption = float(sales_value.sum())
-        unmet_value = float(np.sum(unmet_qty * current_prices))
+        realized_consumption = float(household_sales_value.sum())
+        planned_government_purchases = float(government_planned_spending.sum())
+        unmet_household_value = float(np.sum(household_unmet_qty * current_prices))
+        unmet_government_value = float(np.sum(government_unmet_qty * current_prices))
+        unmet_value = unmet_household_value + unmet_government_value
         inventory_value = float(np.sum(inventory_end * current_prices))
 
         monthly_rows.append({
@@ -507,6 +599,10 @@ def simulate(
             "Inflation_12M": inflation_12m,
             "Planned_Consumption": planned_total,
             "Realized_Consumption_Sales": realized_consumption,
+            "Planned_Government_Purchases": planned_government_purchases,
+            "Government_Purchases": realized_government_purchases,
+            "Unmet_Household_Demand_Value": unmet_household_value,
+            "Unmet_Government_Demand_Value": unmet_government_value,
             "Unmet_Demand_Value": unmet_value,
             "Inventory_Value": inventory_value,
             "Shortage_Product_Share": float(np.mean(unmet_qty > np.maximum(0.01 * demand, 1e-9))),
@@ -530,6 +626,15 @@ def simulate(
             "Household_Gross_Income": labor_macro["Household_Gross_Income"],
             "Household_Taxes": labor_macro["Household_Taxes"],
             "Household_Disposable_Income": labor_macro["Household_Disposable_Income"],
+            "Household_Transfers": labor_macro["Transfers"],
+            "Household_Unemployment_Transfers": labor_macro["Unemployment_Transfers"],
+            "Household_General_Transfers": labor_macro["General_Transfers"],
+            "Corporate_Tax_Revenue": corporate_tax_revenue,
+            "Government_Revenue": fiscal["Government_Revenue"],
+            "Government_Spending": fiscal["Government_Spending"],
+            "Government_Budget_Balance": fiscal["Government_Budget_Balance"],
+            "Debt_Interest": fiscal["Debt_Interest"],
+            "Public_Debt_End": fiscal["Public_Debt_End"],
             "Income_Gini_Class_Average": labor_macro["Income_Gini_Class_Average"],
             "Labor_Productivity_Index": labor_macro["Labor_Productivity_Index"],
             "Real_Wage_Index": labor_macro["Real_Wage_Index"],
@@ -557,6 +662,8 @@ def simulate(
                 "Generation": int(meta_generation[i]),
                 "Created_Period_Month": int(meta_created_period[i]),
                 "Price": current_prices[i],
+                "Household_Demand": household_demand[i],
+                "Government_Demand": government_demand_qty[i],
                 "Demand": demand[i],
                 "Production": current_production[i],
                 "Inventory_Start": inventory_start[i],
@@ -572,6 +679,22 @@ def simulate(
                 "Operating_Profit_Proxy": product_profit_proxy[i],
                 "Profit_Margin_Proxy": product_margin_proxy[i],
             })
+
+        government_rows.append({
+            "Period_Month": t, "Year": year, "Month_in_Year": month_in_year,
+            **fiscal,
+            "Government_Purchase_Budget": current_government_purchase_budget,
+            "Planned_Government_Purchases": planned_government_purchases,
+            "Unmet_Government_Demand_Value": unmet_government_value,
+        })
+
+        next_purchase_budget, next_transfer_budget = next_government_budgets(
+            gross_tax_revenue=fiscal["Government_Revenue"],
+            current_purchase_budget=current_government_purchase_budget,
+            government_consumption_share=government_consumption_share,
+            general_transfer_share=general_transfer_share,
+            max_government_demand_growth=max_government_demand_growth,
+        )
 
         background = annual_inflation / 12.0
         noise = rng.normal(0.0, price_noise, len(current_prices))
@@ -615,6 +738,8 @@ def simulate(
         current_prices = next_prices
         current_production = next_production
         current_average_wage = next_wage
+        current_government_purchase_budget = next_purchase_budget
+        current_general_transfer_budget = next_transfer_budget
         cpi_history.append(cpi)
         prev_nominal_gdp = nominal_gdp
         prev_real_gdp = real_gdp
@@ -639,6 +764,7 @@ def simulate(
     market_events_df = pd.DataFrame(market_event_rows)
     product_events_df = pd.DataFrame(product_event_rows)
     household_income_monthly = pd.DataFrame(household_income_rows)
+    government_monthly = pd.DataFrame(government_rows)
 
     products_final = product_meta.copy()
     products_final["Current_Price"] = current_prices
@@ -702,6 +828,15 @@ def simulate(
             "Capital_Income": float(y["Capital_Income"].sum()),
             "Household_Gross_Income": float(y["Household_Gross_Income"].sum()),
             "Household_Disposable_Income": float(y["Household_Disposable_Income"].sum()),
+            "Household_Tax_Revenue": float(y["Household_Taxes"].sum()),
+            "Corporate_Tax_Revenue": float(y["Corporate_Tax_Revenue"].sum()),
+            "Government_Revenue": float(y["Government_Revenue"].sum()),
+            "Government_Purchases": float(y["Government_Purchases"].sum()),
+            "Government_Transfers": float(y["Household_Transfers"].sum()),
+            "Government_Spending": float(y["Government_Spending"].sum()),
+            "Government_Budget_Balance": float(y["Government_Budget_Balance"].sum()),
+            "Public_Debt_End": float(end["Public_Debt_End"]),
+            "Debt_to_GDP_End": float(end["Public_Debt_End"] / max(nominal_flow, 1e-9)),
             "Income_Gini_End_Class_Average": float(end["Income_Gini_Class_Average"]),
             "Labor_Productivity_Index_End": float(end["Labor_Productivity_Index"]),
             "Labor_Constraint_Months": int((y["Labor_Constraint_Production_Factor"] < 0.999999).sum()),
@@ -717,4 +852,5 @@ def simulate(
         products_final,
         product_events_df,
         household_income_monthly,
+        government_monthly,
     )

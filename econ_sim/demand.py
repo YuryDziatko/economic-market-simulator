@@ -31,8 +31,14 @@ def calibrate_baseline_spending(
     )
     product_revenue = products["Revenue_P0"].to_numpy(float)
 
-    if not np.isclose(class_budget.sum(), product_revenue.sum(), atol=0.01):
-        raise ValueError("Household consumption and product P0 revenue must reconcile before basket calibration")
+    # In Phase 3 households no longer need to absorb all output: taxes fund a
+    # separate government-demand sector. Preserve the Period-0 product mix while
+    # scaling household basket targets to the actual household consumption budget.
+    product_total = float(product_revenue.sum())
+    household_total = float(class_budget.sum())
+    if product_total <= 0 or household_total <= 0:
+        raise ValueError("Period-0 product revenue and household consumption must be positive")
+    product_revenue = product_revenue * (household_total / product_total)
 
     pref = basket_preferences.set_index("Division")
     product_divisions = products["Division"].astype(str).tolist()

@@ -83,6 +83,8 @@ def labor_and_income_state(
     average_wage: float,
     tax_rate: float,
     unemployment_transfer_rate: float,
+    corporate_profit_tax_rate: float = 0.0,
+    general_transfers_by_class: np.ndarray | None = None,
 ) -> tuple[dict, pd.DataFrame, float]:
     """
     Compute labor demand, employment, class income and a production labor-capacity factor.
@@ -157,19 +159,31 @@ def labor_and_income_state(
     else:
         labor_income_class = np.zeros_like(raw_labor)
 
-    # The remainder of national production income is capital/business income.
-    # This closes the household income side until investment/government are modeled.
-    capital_income_total = max(float(nominal_output) - labor_income_total, 0.0)
+    # The remainder of production income is gross business/capital income. In Phase 3
+    # corporate tax is taken from this pool before household capital income is distributed.
+    gross_capital_income_total = max(float(nominal_output) - labor_income_total, 0.0)
+    corporate_tax_proxy = gross_capital_income_total * float(np.clip(corporate_profit_tax_rate, 0.0, 1.0))
+    capital_income_total = max(gross_capital_income_total - corporate_tax_proxy, 0.0)
     capital_weight = counts * labor_calibration["capital_weights"]
     if capital_weight.sum() > 0:
         capital_income_class = capital_income_total * capital_weight / capital_weight.sum()
     else:
         capital_income_class = np.zeros_like(capital_weight, dtype=float)
 
-    transfers_class = unemployed_class * paid_average_wage * float(unemployment_transfer_rate)
-    gross_income_class = labor_income_class + capital_income_class + transfers_class
-    taxes_class = gross_income_class * float(tax_rate)
-    disposable_class = gross_income_class - taxes_class
+    unemployment_transfers_class = unemployed_class * paid_average_wage * float(unemployment_transfer_rate)
+    if general_transfers_by_class is None:
+        general_transfers_class = np.zeros_like(unemployment_transfers_class)
+    else:
+        general_transfers_class = np.asarray(general_transfers_by_class, dtype=float)
+        if len(general_transfers_class) != len(class_order):
+            raise ValueError("general_transfers_by_class length must match household classes")
+        general_transfers_class = np.maximum(general_transfers_class, 0.0)
+
+    transfers_class = unemployment_transfers_class + general_transfers_class
+    taxable_income_class = labor_income_class + capital_income_class
+    taxes_class = taxable_income_class * float(tax_rate)
+    gross_income_class = taxable_income_class + transfers_class
+    disposable_class = taxable_income_class - taxes_class + transfers_class
     savings_class = np.zeros_like(disposable_class)
     consumption_class = disposable_class - savings_class
 
@@ -214,6 +228,8 @@ def labor_and_income_state(
             ),
             "Labor_Income": float(labor_income_class[i]),
             "Capital_Income": float(capital_income_class[i]),
+            "Unemployment_Transfers": float(unemployment_transfers_class[i]),
+            "General_Transfers": float(general_transfers_class[i]),
             "Transfers": float(transfers_class[i]),
             "Gross_Income": float(gross_income_class[i]),
             "Taxes": float(taxes_class[i]),
@@ -239,7 +255,11 @@ def labor_and_income_state(
         "Labor_Constraint_Production_Factor": production_factor,
         "Average_Wage": paid_average_wage,
         "Labor_Income": labor_income_total,
+        "Gross_Capital_Income": gross_capital_income_total,
+        "Corporate_Tax_Proxy": corporate_tax_proxy,
         "Capital_Income": capital_income_total,
+        "Unemployment_Transfers": float(unemployment_transfers_class.sum()),
+        "General_Transfers": float(general_transfers_class.sum()),
         "Transfers": float(transfers_class.sum()),
         "Household_Gross_Income": float(gross_income_class.sum()),
         "Household_Taxes": float(taxes_class.sum()),

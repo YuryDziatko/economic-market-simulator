@@ -192,3 +192,33 @@ The `Employment_Settings` sheet contains class-specific wage multipliers, capita
 - Capital income is the residual national income after labor compensation. This keeps aggregate household income equal to nominal production income while government, investment and finance are not yet modeled.
 - Savings remains zero. A later investment/finance phase should split disposable income between consumption and savings.
 - The reported monthly Gini is a class-average approximation; the original Period-0 individual-household Gini is still generated exactly from the requested target.
+
+## Phase 3 — Government, taxes, transfers and public debt
+
+Phase 3 turns taxes into an explicit government sector instead of simply removing income from households.
+
+Default fiscal settings:
+- Household income tax: **20%**
+- Business/capital-income tax proxy: **20%** (taken before net capital income is distributed to households)
+- Unemployment benefit: **30% of current average wage per unemployed worker unit**
+- Government purchases target: **80% of gross tax revenue**
+- General transfer pool: **20% of gross tax revenue**
+- Reserve share: **0% of gross tax revenue**
+- Initial public debt: **$0**
+- Public-debt interest rate: **3% annual**
+
+The government-purchase, general-transfer, and reserve shares must total 100%.
+
+### Monthly fiscal loop
+1. Production creates labor and gross business/capital income.
+2. Business/capital-income tax is taken before net capital income is allocated to households.
+3. Household income tax is applied to labor + net capital income; transfers are non-taxable in this phase.
+4. Unemployment benefits and general transfers increase household disposable income.
+5. Household demand is calculated from disposable income.
+6. Government purchases create a separate product-demand stream using editable COICOP weights.
+7. Household and government demand compete for the same supply and inventory.
+8. Revenue, spending, debt interest, budget balance, and public debt are recorded.
+9. Current tax revenue sets next month's government-purchase and general-transfer budgets to avoid a same-month circular equation.
+
+New sheets: `Government_Transfers`, `Government_Demand`, and `Phase3_Model`.
+New output: `government_monthly.csv` and a `government_monthly` sheet in `Simulation_Output_Phase3.xlsx`.

@@ -15,6 +15,15 @@ def load_settings(path: Path) -> dict:
     general_df = general_df.dropna(subset=["Key"])
     general = dict(zip(general_df["Key"].astype(str), general_df["Value"]))
 
+    fiscal_share_keys = ["government_consumption_share", "general_transfer_share", "government_reserve_share"]
+    if all(k in general for k in fiscal_share_keys):
+        fiscal_share_sum = sum(float(general[k]) for k in fiscal_share_keys)
+        if abs(fiscal_share_sum - 1.0) > 1e-6:
+            raise ValueError(
+                "Government purchases + general transfers + reserve shares must total 100%; "
+                f"currently {fiscal_share_sum:.2%}"
+            )
+
     classes = pd.read_excel(path, sheet_name="Household_Classes", header=2)
     classes = classes[pd.to_numeric(classes["Order"], errors="coerce").notna()].copy()
     classes["Order"] = classes["Order"].astype(int)
@@ -71,6 +80,24 @@ def load_settings(path: Path) -> dict:
         if (employment[col] <= 0).any():
             raise ValueError(f"Employment_Settings {col} values must be positive")
 
+    government_transfers = pd.read_excel(path, sheet_name="Government_Transfers", header=3)
+    government_transfers = government_transfers[pd.to_numeric(government_transfers["Order"], errors="coerce").notna()].copy()
+    government_transfers["Order"] = government_transfers["Order"].astype(int)
+    government_transfers["Class"] = government_transfers["Class"].astype(str)
+    government_transfers = government_transfers.sort_values("Order")
+    if government_transfers["Class"].tolist() != class_names:
+        raise ValueError("Government_Transfers classes/order must match Household_Classes")
+    government_transfers["Transfer Weight"] = pd.to_numeric(government_transfers["Transfer Weight"], errors="raise")
+    if (government_transfers["Transfer Weight"] < 0).any():
+        raise ValueError("Government transfer weights cannot be negative")
+
+    government_demand = pd.read_excel(path, sheet_name="Government_Demand", header=3)
+    government_demand = government_demand.dropna(subset=["Division"]).copy()
+    government_demand["Division"] = government_demand["Division"].astype(str).str.replace(r"\.0$", "", regex=True).str.zfill(2)
+    government_demand["Government Weight"] = pd.to_numeric(government_demand["Government Weight"], errors="raise")
+    if (government_demand["Government Weight"] < 0).any():
+        raise ValueError("Government demand weights cannot be negative")
+
     return {
         "general": general,
         "classes": classes,
@@ -80,6 +107,8 @@ def load_settings(path: Path) -> dict:
         "quantity": quantity,
         "baskets": baskets,
         "employment": employment,
+        "government_transfers": government_transfers,
+        "government_demand": government_demand,
     }
 
 
@@ -113,12 +142,12 @@ def save_outputs(output_dir: Path, **frames):
         df.to_csv(output_dir / f"{name}.csv", index=False)
 
     # This workbook is convenience output when the project is run locally in PyCharm.
-    excel_path = output_dir / "Simulation_Output_Phase2.xlsx"
+    excel_path = output_dir / "Simulation_Output_Phase3.xlsx"
     with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
         preferred = [
             "yearly_summary", "monthly_macro", "households", "companies",
             "products_seed", "products_final", "product_events", "production",
-            "basket_calibration", "household_income_monthly", "company_events", "market_events"
+            "basket_calibration", "household_income_monthly", "government_monthly", "company_events", "market_events"
         ]
         for name in preferred:
             if name in frames:
