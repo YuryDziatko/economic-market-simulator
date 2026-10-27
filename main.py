@@ -1,11 +1,6 @@
 from pathlib import Path
-import shutil
-import numpy as np
 
-from econ_sim.io import load_settings, load_products, save_outputs
-from econ_sim.companies import prepare_products, generate_companies
-from econ_sim.households import generate_households
-from econ_sim.engine import simulate
+from econ_sim import SimulationConfig, run_simulation
 from econ_sim.utils import gini
 
 ROOT = Path(__file__).resolve().parent
@@ -13,305 +8,55 @@ DATA = ROOT / "data"
 OUTPUT = ROOT / "output"
 
 
-def money(x):
-    return f"${x:,.0f}"
+def money(value: float) -> str:
+    return f"${value:,.0f}"
 
 
-def main():
-    cfg = load_settings(DATA / "Simulation_Settings.xlsx")
-    g = cfg["general"]
+def main() -> None:
+    # Excel remains the default UI for a local PyCharm run, but after this line
+    # the simulation is controlled only by the typed SimulationConfig object.
+    config = SimulationConfig.from_excel(DATA / "Simulation_Settings.xlsx")
 
-    target_gini = float(g["target_gini"])
-    tax_rate = float(g["tax_rate"])
-    interest_rate = float(g["interest_rate"])
-    annual_inflation = float(g["annual_inflation"])
-    n_households = int(g["num_households"])
-    n_companies = int(g["num_companies"])
-    years = int(g["simulation_years"])
-    seed = int(g["random_seed"])
-    price_noise = float(g["monthly_price_noise_std"])
-
-    demographic_growth = float(g["demographic_growth"])
-    company_growth_sensitivity = float(g["company_growth_sensitivity"])
-    allow_company_exits = bool(int(g["allow_company_exits"]))
-    price_adjustment_speed = float(g["price_adjustment_speed"])
-    production_adjustment_speed = float(g["production_adjustment_speed"])
-    max_monthly_price_change = float(g["max_monthly_price_change"])
-    max_monthly_production_change = float(g["max_monthly_production_change"])
-    initial_inventory_months = float(g["initial_inventory_months"])
-
-    entry_shortage_weight = float(g["entry_shortage_weight"])
-    entry_demand_growth_weight = float(g["entry_demand_growth_weight"])
-    entry_margin_weight = float(g["entry_margin_weight"])
-    exit_surplus_weight = float(g["exit_surplus_weight"])
-    exit_demand_decline_weight = float(g["exit_demand_decline_weight"])
-    exit_loss_weight = float(g["exit_loss_weight"])
-    max_entries_per_product = int(g["max_entries_per_product"])
-    max_exits_per_product = int(g["max_exits_per_product"])
-    entry_capacity_share = float(g["entry_capacity_share"])
-    exit_capacity_share = float(g["exit_capacity_share"])
-    min_entry_score = float(g["min_entry_score"])
-    min_exit_score = float(g["min_exit_score"])
-
-    product_innovation_chance = float(g["product_innovation_chance"])
-    innovation_demand_share = float(g["innovation_demand_share"])
-    innovation_output_share = float(g["innovation_output_share"])
-    innovation_price_min_multiplier = float(g["innovation_price_min_multiplier"])
-    innovation_price_max_multiplier = float(g["innovation_price_max_multiplier"])
-    innovation_elasticity_noise = float(g["innovation_elasticity_noise"])
-    innovation_initial_firms = int(g["innovation_initial_firms"])
-    max_new_products_per_month = int(g["max_new_products_per_month"])
-    new_products_can_innovate = bool(int(g["new_products_can_innovate"]))
-
-    labor_force_participation = float(g["labor_force_participation"])
-    initial_unemployment_rate = float(g["initial_unemployment_rate"])
-    labor_income_share_p0 = float(g["labor_income_share_p0"])
-    labor_output_elasticity = float(g["labor_output_elasticity"])
-    labor_wage_demand_elasticity = float(g["labor_wage_demand_elasticity"])
-    annual_labor_productivity_growth = float(g["annual_labor_productivity_growth"])
-    wage_adjustment_speed = float(g["wage_adjustment_speed"])
-    wage_inflation_pass_through = float(g["wage_inflation_pass_through"])
-    max_monthly_wage_change = float(g["max_monthly_wage_change"])
-    unemployment_transfer_rate = float(g["unemployment_transfer_rate"])
-
-    corporate_profit_tax_rate = float(g["corporate_profit_tax_rate"])
-    government_consumption_share = float(g["government_consumption_share"])
-    general_transfer_share = float(g["general_transfer_share"])
-    government_reserve_share = float(g["government_reserve_share"])
-    initial_public_debt = float(g["initial_public_debt"])
-    debt_interest_rate = float(g["debt_interest_rate"])
-    max_government_demand_growth = float(g["max_government_demand_growth"])
-
-    rng = np.random.default_rng(seed)
-
-    OUTPUT.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(DATA / "Product_List.xlsx", OUTPUT / "Product_List_Seed_Copy.xlsx")
-
-    products = load_products(DATA / "Product_List.xlsx")
-    products = prepare_products(products, cfg["quantity"], cfg["markets"], rng)
-    period0_gdp = float(products["Revenue_P0"].sum())
-
-    households = generate_households(
-        n_households, period0_gdp, target_gini, tax_rate, cfg["classes"], rng
-    )
-    companies, production = generate_companies(
-        products, n_companies, cfg["sizes"], cfg["ownership"], rng
+    result = run_simulation(
+        config,
+        settings_path=DATA / "Simulation_Settings.xlsx",
+        product_path=DATA / "Product_List.xlsx",
+        output_dir=OUTPUT,
+        save=True,
     )
 
-    company_revenue = float(companies["Revenue_P0"].sum())
-    household_income = float(households["Gross_Monthly_Income"].sum())
-    if not np.isclose(company_revenue, period0_gdp, atol=0.01):
-        raise RuntimeError("Company revenue does not reconcile to GDP")
-    if not np.isclose(household_income, period0_gdp, atol=0.01):
-        raise RuntimeError("Household income does not reconcile to GDP")
+    final = result.final_year
+    generated_gini = gini(result.households["Gross_Monthly_Income"])
 
-    (
-        monthly, yearly, basket_calibration, company_events, market_events,
-        product_monthly, products_final, product_events, household_income_monthly, government_monthly,
-    ) = simulate(
-        products=products,
-        households=households,
-        companies=companies,
-        production=production,
-        classes=cfg["classes"],
-        basket_preferences=cfg["baskets"],
-        employment_settings=cfg["employment"],
-        government_transfers=cfg["government_transfers"],
-        government_demand=cfg["government_demand"],
-        years=years,
-        annual_inflation=annual_inflation,
-        price_noise=price_noise,
-        tax_rate=tax_rate,
-        demographic_growth=demographic_growth,
-        company_growth_sensitivity=company_growth_sensitivity,
-        allow_company_exits=allow_company_exits,
-        price_adjustment_speed=price_adjustment_speed,
-        production_adjustment_speed=production_adjustment_speed,
-        max_monthly_price_change=max_monthly_price_change,
-        max_monthly_production_change=max_monthly_production_change,
-        initial_inventory_months=initial_inventory_months,
-        entry_shortage_weight=entry_shortage_weight,
-        entry_demand_growth_weight=entry_demand_growth_weight,
-        entry_margin_weight=entry_margin_weight,
-        exit_surplus_weight=exit_surplus_weight,
-        exit_demand_decline_weight=exit_demand_decline_weight,
-        exit_loss_weight=exit_loss_weight,
-        max_entries_per_product=max_entries_per_product,
-        max_exits_per_product=max_exits_per_product,
-        entry_capacity_share=entry_capacity_share,
-        exit_capacity_share=exit_capacity_share,
-        min_entry_score=min_entry_score,
-        min_exit_score=min_exit_score,
-        product_innovation_chance=product_innovation_chance,
-        innovation_demand_share=innovation_demand_share,
-        innovation_output_share=innovation_output_share,
-        innovation_price_min_multiplier=innovation_price_min_multiplier,
-        innovation_price_max_multiplier=innovation_price_max_multiplier,
-        innovation_elasticity_noise=innovation_elasticity_noise,
-        innovation_initial_firms=innovation_initial_firms,
-        max_new_products_per_month=max_new_products_per_month,
-        new_products_can_innovate=new_products_can_innovate,
-        labor_force_participation=labor_force_participation,
-        initial_unemployment_rate=initial_unemployment_rate,
-        labor_income_share_p0=labor_income_share_p0,
-        labor_output_elasticity=labor_output_elasticity,
-        labor_wage_demand_elasticity=labor_wage_demand_elasticity,
-        annual_labor_productivity_growth=annual_labor_productivity_growth,
-        wage_adjustment_speed=wage_adjustment_speed,
-        wage_inflation_pass_through=wage_inflation_pass_through,
-        max_monthly_wage_change=max_monthly_wage_change,
-        unemployment_transfer_rate=unemployment_transfer_rate,
-        corporate_profit_tax_rate=corporate_profit_tax_rate,
-        government_consumption_share=government_consumption_share,
-        general_transfer_share=general_transfer_share,
-        government_reserve_share=government_reserve_share,
-        initial_public_debt=initial_public_debt,
-        debt_interest_rate=debt_interest_rate,
-        max_government_demand_growth=max_government_demand_growth,
-        rng=rng,
-    )
+    print("\n" + "=" * 92)
+    print("ECONOMIC MARKET SIMULATOR — CONFIG API")
+    print("=" * 92)
+    print(f"Simulation horizon          : {config.simulation_years} years")
+    print(f"Random seed                 : {config.random_seed}")
+    print(f"Starting households         : {config.num_households:,}")
+    print(f"Starting companies          : {config.num_companies:,}")
+    print(f"Starting products           : {len(result.products_seed):,}")
+    print(f"Final products              : {len(result.products_final):,}")
+    print(f"Period-0 annualized GDP     : {money(result.period0_gdp * 12)}")
+    print(f"Target / generated Gini     : {config.target_gini:.3f} / {generated_gini:.3f}")
+    print(f"Household income tax        : {config.tax_rate:.2%}")
+    print(f"Corporate tax              : {config.corporate_profit_tax_rate:.2%}")
 
-    out = save_outputs(
-        OUTPUT,
-        yearly_summary=yearly,
-        monthly_macro=monthly,
-        households=households,
-        companies=companies,
-        products_seed=products,
-        products_final=products_final,
-        product_events=product_events,
-        production=production,
-        basket_calibration=basket_calibration,
-        company_events=company_events,
-        market_events=market_events,
-        product_monthly=product_monthly,
-        household_income_monthly=household_income_monthly,
-        government_monthly=government_monthly,
-    )
+    if final:
+        print("\nFINAL YEAR")
+        print(f"Nominal GDP                 : {money(final['Nominal_GDP'])}")
+        print(f"Real GDP growth             : {final['Real_GDP_Growth_YoY']:.2%}")
+        print(f"Inflation                   : {final['Inflation_YoY']:.2%}")
+        print(f"Unemployment                : {final['Unemployment_Rate_End']:.2%}")
+        print(f"Income Gini                 : {final['Income_Gini_End_Class_Average']:.3f}")
+        print(f"Households                  : {int(final['Household_Count_End']):,}")
+        print(f"Companies                   : {int(final['Company_Count_End']):,}")
+        print(f"Products                    : {int(final['Product_Count_End']):,}")
+        print(f"Public debt / GDP           : {final['Debt_to_GDP_End']:.2%}")
 
-    class_order = cfg["classes"]["Class"].astype(str).tolist()
-    summary = households.groupby("Class", observed=True).agg(
-        Households=("Household_ID", "count"),
-        Avg_Monthly_Income=("Gross_Monthly_Income", "mean"),
-        Income_Share=("Gross_Monthly_Income", "sum"),
-        Consumption=("Consumption", "sum"),
-    ).reindex(class_order)
-    summary["Income_Share"] /= period0_gdp
-
-    print("\n" + "=" * 100)
-    print("ECONOMIC SIMULATION — PHASE 3: GOVERNMENT + TAXES + TRANSFERS")
-    print("=" * 100)
-    print(f"Starting products/services      : {len(products):,}")
-    print(f"Final products/services         : {len(products_final):,}")
-    print(f"New products created            : {len(product_events):,}")
-    print(f"Starting households             : {len(households):,}")
-    print(f"Starting companies              : {len(companies):,}")
-    print(f"Period-0 monthly GDP            : {money(period0_gdp)}")
-    print(f"Period-0 annualized GDP         : {money(period0_gdp * 12)}")
-    print(f"Target / generated Gini         : {target_gini:.3f} / {gini(households['Gross_Monthly_Income']):.3f}")
-    print(f"Annual household growth         : {demographic_growth:.2%}")
-    print(f"Company growth sensitivity      : {company_growth_sensitivity:.2f}x real GDP growth")
-    print(f"Background inflation            : {annual_inflation:.2%}")
-    print(f"Monthly product innovation      : {product_innovation_chance:.2%} per eligible product")
-    print(f"Labor-force participation       : {labor_force_participation:.2%}")
-    print(f"Initial unemployment target     : {initial_unemployment_rate:.2%}")
-    print(f"Annual labor productivity       : {annual_labor_productivity_growth:.2%}")
-    print(f"Household income tax            : {tax_rate:.2%}")
-    print(f"Corporate profit tax            : {corporate_profit_tax_rate:.2%}")
-    print(f"Unemployment benefit            : {unemployment_transfer_rate:.2%} of average wage")
-    print(f"Government purchases target     : {government_consumption_share:.2%} of tax revenue")
-    print(f"General transfers target        : {general_transfer_share:.2%} of tax revenue")
-    print(f"Public debt interest            : {debt_interest_rate:.2%}")
-    print(f"Interest rate (stored)          : {interest_rate:.2%}")
-    print(f"Simulation                      : {years} years / {years * 12} months")
-
-    print("\nHOUSEHOLD CLASS SUMMARY — PERIOD 0")
-    print(summary.to_string(formatters={
-        "Avg_Monthly_Income": lambda x: f"${x:,.0f}",
-        "Income_Share": lambda x: f"{x:.1%}",
-        "Consumption": lambda x: f"${x:,.0f}",
-    }))
-
-    print("\nYEARLY MACRO SUMMARY")
-    print(yearly[[
-        "Year", "Nominal_GDP", "Nominal_GDP_Growth_YoY", "Real_GDP_Growth_YoY",
-        "Inflation_YoY", "Household_Count_End", "Company_Count_End",
-        "Unemployment_Rate_End", "Average_Wage_Annual",
-        "Income_Gini_End_Class_Average", "Government_Budget_Balance", "Public_Debt_End",
-        "Debt_to_GDP_End", "Average_Shortage_Product_Share",
-        "Monopoly_Products_End", "Oligopoly_Products_End", "Competitive_Products_End",
-        "Product_Count_End", "New_Products_Created"
-    ]].to_string(index=False, formatters={
-        "Nominal_GDP": lambda x: f"${x:,.0f}",
-        "Nominal_GDP_Growth_YoY": lambda x: f"{x:.2%}",
-        "Real_GDP_Growth_YoY": lambda x: f"{x:.2%}",
-        "Inflation_YoY": lambda x: f"{x:.2%}",
-        "Unemployment_Rate_End": lambda x: f"{x:.2%}",
-        "Average_Wage_Annual": lambda x: f"${x:,.0f}",
-        "Income_Gini_End_Class_Average": lambda x: f"{x:.3f}",
-        "Government_Budget_Balance": lambda x: f"${x:,.0f}",
-        "Public_Debt_End": lambda x: f"${x:,.0f}",
-        "Debt_to_GDP_End": lambda x: f"{x:.1%}",
-        "Average_Shortage_Product_Share": lambda x: f"{x:.1%}",
-    }))
-
-    print("\nHOUSEHOLD INCOME / EMPLOYMENT — FINAL MONTH")
-    final_income = household_income_monthly[household_income_monthly["Period_Month"] == years * 12].copy()
-    print(final_income[[
-        "Class", "Households", "Employed", "Unemployed", "Average_Wage_Employed",
-        "Labor_Income", "Capital_Income", "Transfers", "Taxes",
-        "Average_Gross_Income_Per_Household", "Income_Share"
-    ]].to_string(index=False, formatters={
-        "Average_Wage_Employed": lambda x: f"${x:,.0f}",
-        "Labor_Income": lambda x: f"${x:,.0f}",
-        "Capital_Income": lambda x: f"${x:,.0f}",
-        "Transfers": lambda x: f"${x:,.0f}",
-        "Taxes": lambda x: f"${x:,.0f}",
-        "Average_Gross_Income_Per_Household": lambda x: f"${x:,.0f}",
-        "Income_Share": lambda x: f"{x:.1%}",
-    }))
-
-    print("\nGOVERNMENT — FINAL YEAR")
-    final_gov = yearly.iloc[-1]
-    print(f"Government revenue              : {money(final_gov['Government_Revenue'])}")
-    print(f"Government spending             : {money(final_gov['Government_Spending'])}")
-    print(f"Budget balance                  : {money(final_gov['Government_Budget_Balance'])}")
-    print(f"Public debt                     : {money(final_gov['Public_Debt_End'])}")
-    print(f"Debt / GDP                      : {final_gov['Debt_to_GDP_End']:.1%}")
-
-    print("\nCOMPANY ENTRY / EXIT EVENTS")
-    print(company_events.to_string(index=False, formatters={
-        "Prior_Year_Real_GDP_Growth": lambda x: f"{x:.2%}",
-    }))
-
-    if not market_events.empty:
-        print("\nTOP MARKET ENTRY / EXIT EVENTS")
-        display_events = market_events.sort_values(["Year", "Firm_Change"], ascending=[True, False]).head(30)
-        print(display_events[[
-            "Year", "Product_ID", "Event", "Firm_Change", "Firms_Before", "Firms_After",
-            "Market_Before", "Market_After", "Prior_Shortage_Rate",
-            "Prior_Demand_Growth", "Prior_Profit_Margin"
-        ]].to_string(index=False, formatters={
-            "Prior_Shortage_Rate": lambda x: f"{x:.1%}",
-            "Prior_Demand_Growth": lambda x: f"{x:.1%}",
-            "Prior_Profit_Margin": lambda x: f"{x:.1%}",
-        }))
-
-    if not product_events.empty:
-        print("\nRECENT PRODUCT LAUNCHES")
-        print(product_events.tail(20)[[
-            "Year", "Month_in_Year", "Parent_Product", "New_Product",
-            "Parent_Price", "Launch_Price", "Demand_Share_Transferred"
-        ]].to_string(index=False, formatters={
-            "Parent_Price": lambda x: f"${x:,.2f}",
-            "Launch_Price": lambda x: f"${x:,.2f}",
-            "Demand_Share_Transferred": lambda x: f"{x:.1%}",
-        }))
-
-    print(f"\nDetailed output: {out}")
-    print(f"Seed product copy: {OUTPUT / 'Product_List_Seed_Copy.xlsx'}")
-    print(f"Dynamic product DB: {OUTPUT / 'Product_List_Simulation.xlsx'}")
-    print("=" * 100)
+    if result.output_workbook:
+        print(f"\nDetailed output             : {result.output_workbook}")
+    print("=" * 92)
 
 
 if __name__ == "__main__":

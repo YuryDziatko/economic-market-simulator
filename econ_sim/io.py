@@ -10,13 +10,13 @@ def _check_share(df: pd.DataFrame, col: str, name: str):
         raise ValueError(f"{name} shares must total 100%; currently {value:.4%}")
 
 
-def load_settings(path: Path) -> dict:
+def load_settings(path: Path, *, validate_general: bool = True) -> dict:
     general_df = pd.read_excel(path, sheet_name="General_Settings", header=2)
     general_df = general_df.dropna(subset=["Key"])
     general = dict(zip(general_df["Key"].astype(str), general_df["Value"]))
 
     fiscal_share_keys = ["government_consumption_share", "general_transfer_share", "government_reserve_share"]
-    if all(k in general for k in fiscal_share_keys):
+    if validate_general and all(k in general for k in fiscal_share_keys):
         fiscal_share_sum = sum(float(general[k]) for k in fiscal_share_keys)
         if abs(fiscal_share_sum - 1.0) > 1e-6:
             raise ValueError(

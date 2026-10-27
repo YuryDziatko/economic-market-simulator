@@ -1,72 +1,106 @@
-# EconomicSimulation — Phase 2
+# Economic Market Simulator
 
-Phase 1 turns the Phase-0 baseline into a monthly supply/demand simulation.
+A Python agent-style economic simulation with households, companies, products, labor, government, market structure, product innovation, supply/demand adjustment, and monthly/annual macroeconomic reporting.
 
-## New in Phase 1
+The current model includes:
 
-- Household consumption baskets by income class.
-- Period-0 basket calibration so class budgets and product sales reconcile exactly.
-- Product demand reacts to price using each product's 0–1 elasticity.
-- Household class budgets constrain total planned spending.
-- Product inventory, realized sales, unmet demand, shortages, and surpluses.
-- Endogenous price response to supply/demand imbalance plus background inflation.
-- Company/product production responds gradually to demand.
-- Competitive markets react faster than oligopoly; oligopoly faster than monopoly.
-- Real GDP changes because product quantities now change.
-- Household count grows once per year using `demographic_growth` (1% default).
-- Company count grows once per year from the previous year's real GDP growth.
+- household income classes and target Gini;
+- consumption baskets and price elasticity;
+- product supply, demand, inventory, shortages and price adjustment;
+- competitive, oligopoly and monopoly markets;
+- intelligent firm entry/exit;
+- monthly product innovation;
+- demographic growth;
+- employment, unemployment, wages and productivity;
+- labor and capital household income;
+- household and business taxes;
+- transfers, government purchases, budget balance and public debt.
 
-## Annual growth rules
+## Clean simulation API
 
-### Households
+The engine no longer reads scalar settings directly from Excel and no longer requires dozens of independent arguments.
 
-At the start of simulation Year 2 and later:
+All scalar settings live in one typed object:
 
-`Households(year) = round(initial_households × (1 + demographic_growth)^(year - 1))`
+```python
+from econ_sim import SimulationConfig, run_simulation
 
-With 1,000 initial households and 1% demographics:
+config = SimulationConfig(
+    simulation_years=10,
+    num_households=1000,
+    num_companies=1000,
+    target_gini=0.30,
+    tax_rate=0.20,
+    annual_inflation=0.02,
+)
 
-- Year 1: 1,000
-- Year 2: 1,010
-- Year 3: about 1,020
+result = run_simulation(config)
+print(result.summary())
+```
 
-### Companies
+For normal PyCharm use, load the existing Excel control workbook:
 
-At the start of Year 2 and later:
+```python
+config = SimulationConfig.from_excel("data/Simulation_Settings.xlsx")
+result = run_simulation(config)
+```
 
-`company_entry_rate = max(previous_real_GDP_growth, 0) × company_growth_sensitivity`
+For a scenario or future web form, override only the requested values:
 
-`new_companies = round(current_companies × company_entry_rate)`
+```python
+baseline = SimulationConfig.from_excel("data/Simulation_Settings.xlsx")
 
-Default sensitivity = 1.0.
+scenario = baseline.with_overrides(
+    tax_rate=0.30,
+    annual_inflation=0.04,
+    demographic_growth=0.015,
+)
 
-Example: if real GDP grew 3%, about 3% more companies enter.
+result = run_simulation(scenario)
+```
 
-Company exits during recessions are disabled by default. Set `allow_company_exits = 1` to enable them.
+`SimulationConfig` is immutable: changing a scenario does not modify the baseline configuration.
 
-## Monthly Phase-1 loop
+## Why this architecture matters
 
-1. Determine current household count and class consumption budgets.
-2. Calculate product demand by household class.
-3. Apply product price elasticity.
-4. Re-scale each class to its consumption budget.
-5. Compare demand with production + inventory.
-6. Realized sales are limited by available supply.
-7. Unsold output becomes inventory; excess demand becomes unmet demand.
-8. Price changes from background inflation plus supply/demand pressure.
-9. Next month's production adjusts toward demand.
-10. Recalculate nominal GDP, real GDP, inflation, profit, shortages and inventory.
+There are now three separate layers:
 
-## Important Phase-1 simplifications
+```text
+Excel / future web form / tests
+            ↓
+     SimulationConfig
+            ↓
+      run_simulation()
+            ↓
+       economic engine
+            ↓
+     SimulationResult
+```
 
-- Household income distribution/Gini is fixed in real terms after Period 0.
-- New households preserve the same class distribution.
-- New companies affect the company population count; detailed entrant balance sheets and product assignments are a later refinement.
-- The interest rate is still stored but not behavioral yet.
-- Government spending is not yet modeled.
-- Product demand uses own-price elasticity only; explicit substitute/complement cross-elasticities are a future phase.
+Excel remains useful for detailed structural tables such as household classes, consumption preferences, company-size mixes, quantity limits, employment-class settings and government demand weights. Scalar run settings come from `SimulationConfig`.
 
-## Run in PyCharm
+This makes a future FastAPI endpoint straightforward: deserialize user inputs, create/override `SimulationConfig`, call `run_simulation(config)`, and return `result.summary()` plus chart-series data.
+
+## Main package structure
+
+```text
+econ_sim/
+    __init__.py
+    api.py               # public run_simulation() API + SimulationResult
+    config.py            # typed SimulationConfig
+    engine.py            # monthly simulation loop
+    demand.py
+    companies.py
+    households.py
+    labor.py
+    government.py
+    firm_dynamics.py
+    product_dynamics.py
+    io.py                # Excel/table loaders and optional file outputs
+    utils.py
+```
+
+## Running locally
 
 Use Python 3.11+.
 
@@ -75,150 +109,44 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Edit assumptions in:
+`main.py` now contains very little orchestration: it loads `SimulationConfig`, calls `run_simulation()`, and prints the main KPIs.
 
-`data/Simulation_Settings.xlsx`
+## Results in memory
 
-Main outputs are written to `output/`, including:
+`run_simulation()` returns a `SimulationResult` object containing DataFrames such as:
 
-- `monthly_macro.csv`
-- `yearly_summary.csv`
-- `product_monthly.csv`
-- `company_events.csv`
-- `basket_calibration.csv`
-- `Simulation_Output_Phase2.xlsx`
+- `monthly_macro`
+- `yearly_summary`
+- `household_income_monthly`
+- `government_monthly`
+- `product_monthly`
+- `product_events`
+- `company_events`
+- `market_events`
+- `products_final`
 
-## Phase 1.1 — Intelligent company entry / exit
+For web use, no files need to be written.
 
-At the beginning of each year after Year 1, the economy-wide number of potential entrants is still determined by prior-year **real GDP growth × company growth sensitivity**. Those entrants are now allocated to specific product markets using three prior-year signals:
+```python
+result = run_simulation(config, save=False)
+chart_data = result.yearly_summary
+kpis = result.summary()
+```
 
-- persistent shortage / unmet demand,
-- product demand growth,
-- operating-profit margin proxy.
+For local Excel/CSV output:
 
-If recession-driven exits are enabled, exits are allocated to markets with excess inventory, falling demand, and losses. A product is never allowed to fall below one producer.
+```python
+result = run_simulation(config, save=True, output_dir="output")
+```
 
-Entry and exit now affect real production capacity. An entrant adds a configurable share of average incumbent capacity; an exit removes a configurable share. Product market structure is reclassified dynamically: 1 firm = Monopoly, 2–4 = Oligopoly, 5+ = Competitive.
+## Tests
 
-Detailed annual allocation is written to `output/market_events.csv` and to the `market_events` sheet in the output workbook. `product_monthly` now also includes `Firm_Count`, the evolving market structure, and a product-level operating-profit proxy.
+```bash
+pytest -q
+```
 
+The smoke test calls the same clean API that a future FastAPI endpoint will call.
 
-## Phase 1.2 — Monthly product innovation
+## Next architecture step
 
-The original `data/Product_List.xlsx` remains the seed database and is never modified.
-At the start of each month, every eligible product has an editable probability (default 2%) of launching one new variant. Variant names always use the original root product name plus launch month/year/serial/generation, so recursive innovation does not create unreadably long names.
-
-Example:
-
-- Parent: `Beer | Corona Extra | 12pk Bottles | $18.99`
-- Variant: `Beer | Corona Extra_M03_Y02_0127_G1 | 12pk Bottles | random launch price`
-
-A variant inherits the parent's COICOP code, division, category, unit and approximately its elasticity. To keep the model closed, the launch initially transfers a configurable share of the parent's baseline demand and production rather than creating new spending or productive capacity from nothing. After launch, it behaves like any other product: its price, demand, production, inventory and firm count evolve normally.
-
-New settings in `General_Settings` include:
-
-- `product_innovation_chance` — default 2% per eligible product per month
-- `innovation_demand_share` — default 10% of parent baseline spending
-- `innovation_output_share` — default 10% of parent output/inventory
-- launch price range — default 85% to 115% of the parent's current price
-- elasticity variation — default 0.05 standard deviation
-- initial firms — default 1
-- optional monthly launch cap
-- whether newly created variants can themselves innovate later
-
-The run writes:
-
-- `output/Product_List_Seed_Copy.xlsx` — untouched copy of the starting product workbook
-- `output/Product_List_Simulation.xlsx` — final dynamic product database plus launch-event log
-- `output/product_events.csv` — every product launch with parent, date, price and transferred shares
-- `output/products_final.csv` — final product state
-
-**Compounding note:** with a 2% monthly probability and `new_products_can_innovate = 1`, product variety compounds. Starting from 477 products, a 10-year run can reasonably reach several thousand products. Set `new_products_can_innovate = 0` or use `max_new_products_per_month` if you want slower growth.
-
-
-## Phase 2 — Employment, wages, and household income
-
-Phase 2 replaces the previous CPI-scaled household-budget shortcut with an explicit monthly labor/income loop.
-
-### Labor market
-
-- Labor force = households × base participation rate × class participation multiplier.
-- Period-0 employment is calibrated from the editable initial unemployment rate.
-- Desired employment rises with real production and falls with labor productivity.
-- Desired employment also responds to the **real wage**: cheaper real labor encourages hiring; expensive real labor reduces hiring.
-- If desired employment exceeds available labor, production is labor-constrained before product demand/sales are calculated.
-- Average wages adjust monthly using labor-market tightness plus partial inflation pass-through.
-
-### Household income
-
-Monthly national income is split into:
-
-1. **Labor income** = employment × average wage, allocated across classes with editable wage multipliers.
-2. **Capital/business income** = remaining nominal production income, allocated with editable capital-income weights.
-3. **Transfers** = optional unemployment transfer, default 0 until the government sector is added.
-
-Taxes are then deducted and, because savings is still 0 in Phase 2, disposable income becomes the class consumption budget. Product demand therefore feeds back through:
-
-`income → consumption demand → production → employment → wages/income`
-
-### New settings
-
-`General_Settings` now includes:
-
-- `labor_force_participation` — 65% default
-- `initial_unemployment_rate` — 4% default
-- `labor_income_share_p0` — 65% default
-- `labor_output_elasticity` — 0.90 default
-- `annual_labor_productivity_growth` — 1.5% default
-- `labor_wage_demand_elasticity` — 0.35 default
-- `wage_adjustment_speed` — 0.08 default
-- `wage_inflation_pass_through` — 0.50 default
-- `max_monthly_wage_change` — 5% default
-- `unemployment_transfer_rate` — 0% default
-
-The `Employment_Settings` sheet contains class-specific wage multipliers, capital-income weights, and labor-force participation multipliers.
-
-### New outputs
-
-- `output/household_income_monthly.csv` — monthly employment/income by class
-- labor-force, employment, unemployment, wages, labor income, capital income and income-Gini columns in `monthly_macro.csv`
-- annual employment/wage/income indicators in `yearly_summary.csv`
-- `household_income_monthly` sheet in `Simulation_Output_Phase2.xlsx`
-
-### Important Phase-2 simplifications
-
-- One household represents one worker unit for labor-market accounting.
-- Employment is allocated proportionally across each class's labor force; class wage multipliers determine pay differences.
-- Capital income is the residual national income after labor compensation. This keeps aggregate household income equal to nominal production income while government, investment and finance are not yet modeled.
-- Savings remains zero. A later investment/finance phase should split disposable income between consumption and savings.
-- The reported monthly Gini is a class-average approximation; the original Period-0 individual-household Gini is still generated exactly from the requested target.
-
-## Phase 3 — Government, taxes, transfers and public debt
-
-Phase 3 turns taxes into an explicit government sector instead of simply removing income from households.
-
-Default fiscal settings:
-- Household income tax: **20%**
-- Business/capital-income tax proxy: **20%** (taken before net capital income is distributed to households)
-- Unemployment benefit: **30% of current average wage per unemployed worker unit**
-- Government purchases target: **80% of gross tax revenue**
-- General transfer pool: **20% of gross tax revenue**
-- Reserve share: **0% of gross tax revenue**
-- Initial public debt: **$0**
-- Public-debt interest rate: **3% annual**
-
-The government-purchase, general-transfer, and reserve shares must total 100%.
-
-### Monthly fiscal loop
-1. Production creates labor and gross business/capital income.
-2. Business/capital-income tax is taken before net capital income is allocated to households.
-3. Household income tax is applied to labor + net capital income; transfers are non-taxable in this phase.
-4. Unemployment benefits and general transfers increase household disposable income.
-5. Household demand is calculated from disposable income.
-6. Government purchases create a separate product-demand stream using editable COICOP weights.
-7. Household and government demand compete for the same supply and inventory.
-8. Revenue, spending, debt interest, budget balance, and public debt are recorded.
-9. Current tax revenue sets next month's government-purchase and general-transfer budgets to avoid a same-month circular equation.
-
-New sheets: `Government_Transfers`, `Government_Demand`, and `Phase3_Model`.
-New output: `government_monthly.csv` and a `government_monthly` sheet in `Simulation_Output_Phase3.xlsx`.
+The next recommended step is a **scenario comparison service** so the application can run a baseline and one or more changed parameter sets and return KPI differences and chart-ready series. After that, the same API can be placed behind FastAPI and Chart.js for deployment on Render.

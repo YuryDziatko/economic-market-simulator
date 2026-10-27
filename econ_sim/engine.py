@@ -12,6 +12,7 @@ from .government import (
     fiscal_update,
     next_government_budgets,
 )
+from .config import SimulationConfig
 from .firm_dynamics import (
     allocate_market_changes,
     classify_market,
@@ -30,58 +31,64 @@ def simulate(
     employment_settings: pd.DataFrame,
     government_transfers: pd.DataFrame,
     government_demand: pd.DataFrame,
-    years: int,
-    annual_inflation: float,
-    price_noise: float,
-    tax_rate: float,
-    demographic_growth: float,
-    company_growth_sensitivity: float,
-    allow_company_exits: bool,
-    price_adjustment_speed: float,
-    production_adjustment_speed: float,
-    max_monthly_price_change: float,
-    max_monthly_production_change: float,
-    initial_inventory_months: float,
-    entry_shortage_weight: float,
-    entry_demand_growth_weight: float,
-    entry_margin_weight: float,
-    exit_surplus_weight: float,
-    exit_demand_decline_weight: float,
-    exit_loss_weight: float,
-    max_entries_per_product: int,
-    max_exits_per_product: int,
-    entry_capacity_share: float,
-    exit_capacity_share: float,
-    min_entry_score: float,
-    min_exit_score: float,
-    product_innovation_chance: float,
-    innovation_demand_share: float,
-    innovation_output_share: float,
-    innovation_price_min_multiplier: float,
-    innovation_price_max_multiplier: float,
-    innovation_elasticity_noise: float,
-    innovation_initial_firms: int,
-    max_new_products_per_month: int,
-    new_products_can_innovate: bool,
-    labor_force_participation: float,
-    initial_unemployment_rate: float,
-    labor_income_share_p0: float,
-    labor_output_elasticity: float,
-    labor_wage_demand_elasticity: float,
-    annual_labor_productivity_growth: float,
-    wage_adjustment_speed: float,
-    wage_inflation_pass_through: float,
-    max_monthly_wage_change: float,
-    unemployment_transfer_rate: float,
-    corporate_profit_tax_rate: float,
-    government_consumption_share: float,
-    general_transfer_share: float,
-    government_reserve_share: float,
-    initial_public_debt: float,
-    debt_interest_rate: float,
-    max_government_demand_growth: float,
+    config: SimulationConfig,
     rng: np.random.Generator,
 ):
+    config.validate()
+
+    # Local aliases keep the economic equations readable while SimulationConfig
+    # remains the single source of truth for scalar run settings.
+    years = config.simulation_years
+    annual_inflation = config.annual_inflation
+    price_noise = config.monthly_price_noise_std
+    tax_rate = config.tax_rate
+    demographic_growth = config.demographic_growth
+    company_growth_sensitivity = config.company_growth_sensitivity
+    allow_company_exits = config.allow_company_exits
+    price_adjustment_speed = config.price_adjustment_speed
+    production_adjustment_speed = config.production_adjustment_speed
+    max_monthly_price_change = config.max_monthly_price_change
+    max_monthly_production_change = config.max_monthly_production_change
+    initial_inventory_months = config.initial_inventory_months
+    entry_shortage_weight = config.entry_shortage_weight
+    entry_demand_growth_weight = config.entry_demand_growth_weight
+    entry_margin_weight = config.entry_margin_weight
+    exit_surplus_weight = config.exit_surplus_weight
+    exit_demand_decline_weight = config.exit_demand_decline_weight
+    exit_loss_weight = config.exit_loss_weight
+    max_entries_per_product = config.max_entries_per_product
+    max_exits_per_product = config.max_exits_per_product
+    entry_capacity_share = config.entry_capacity_share
+    exit_capacity_share = config.exit_capacity_share
+    min_entry_score = config.min_entry_score
+    min_exit_score = config.min_exit_score
+    product_innovation_chance = config.product_innovation_chance
+    innovation_demand_share = config.innovation_demand_share
+    innovation_output_share = config.innovation_output_share
+    innovation_price_min_multiplier = config.innovation_price_min_multiplier
+    innovation_price_max_multiplier = config.innovation_price_max_multiplier
+    innovation_elasticity_noise = config.innovation_elasticity_noise
+    innovation_initial_firms = config.innovation_initial_firms
+    max_new_products_per_month = config.max_new_products_per_month
+    new_products_can_innovate = config.new_products_can_innovate
+    labor_force_participation = config.labor_force_participation
+    initial_unemployment_rate = config.initial_unemployment_rate
+    labor_income_share_p0 = config.labor_income_share_p0
+    labor_output_elasticity = config.labor_output_elasticity
+    labor_wage_demand_elasticity = config.labor_wage_demand_elasticity
+    annual_labor_productivity_growth = config.annual_labor_productivity_growth
+    wage_adjustment_speed = config.wage_adjustment_speed
+    wage_inflation_pass_through = config.wage_inflation_pass_through
+    max_monthly_wage_change = config.max_monthly_wage_change
+    unemployment_transfer_rate = config.unemployment_transfer_rate
+    corporate_profit_tax_rate = config.corporate_profit_tax_rate
+    government_consumption_share = config.government_consumption_share
+    general_transfer_share = config.general_transfer_share
+    government_reserve_share = config.government_reserve_share
+    initial_public_debt = config.initial_public_debt
+    debt_interest_rate = config.debt_interest_rate
+    max_government_demand_growth = config.max_government_demand_growth
+
     months = int(years) * 12
     if months <= 0:
         raise ValueError("Simulation years must be positive")
