@@ -173,3 +173,32 @@ print(comparison.kpi_table())
 The comparison object also provides API-ready JSON via `comparison.to_dict()` and aligned yearly chart data via `comparison.yearly_metric(...)` / `comparison.yearly_dashboard()`.
 
 See `STEP2_SCENARIO_COMPARISON.md` for details.
+
+---
+
+# Step 3 — FastAPI Web Layer
+
+The simulation can now be run through HTTP without putting economic logic inside the web application.
+
+## Start the web server
+
+```powershell
+pip install -r requirements.txt
+uvicorn web_main:app --reload
+```
+
+Then open:
+
+- `http://127.0.0.1:8000/` — minimal browser interface
+- `http://127.0.0.1:8000/docs` — interactive Swagger API documentation
+- `http://127.0.0.1:8000/api/health` — health endpoint
+
+## Public API
+
+- `GET /api/config` — baseline settings
+- `POST /api/simulate` — run one simulation with config overrides
+- `POST /api/compare` — baseline vs one or more scenarios
+
+The API returns JSON-ready KPI and yearly data. Detailed product/company tables remain internal for now so normal API responses do not become unnecessarily large.
+
+See `STEP3_FASTAPI.md` for request examples and Render deployment notes.

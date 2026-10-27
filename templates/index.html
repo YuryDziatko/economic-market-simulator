@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+  <main class="container">
+    <header>
+      <p class="eyebrow">Step 3 · FastAPI MVP</p>
+      <h1>Economic Market Simulator</h1>
+      <p>Change a few assumptions and run the same Python economics engine from your browser.</p>
+    </header>
+
+    <section class="panel">
+      <h2>Simulation settings</h2>
+      <div class="grid">
+        <label>Years <input id="simulation_years" type="number" min="1" max="50" value="3"></label>
+        <label>Households <input id="num_households" type="number" min="10" value="1000"></label>
+        <label>Companies <input id="num_companies" type="number" min="1" value="1000"></label>
+        <label>Gini <input id="target_gini" type="number" min="0" max="0.99" step="0.01" value="0.30"></label>
+        <label>Income tax <input id="tax_rate" type="number" min="0" max="1" step="0.01" value="0.20"></label>
+        <label>Corporate tax <input id="corporate_profit_tax_rate" type="number" min="0" max="1" step="0.01" value="0.20"></label>
+        <label>Inflation target <input id="annual_inflation" type="number" step="0.005" value="0.02"></label>
+        <label>Population growth <input id="demographic_growth" type="number" step="0.005" value="0.01"></label>
+      </div>
+      <button id="runButton">Run simulation</button>
+      <p id="status" class="status"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Result</h2>
+      <div id="cards" class="cards"></div>
+      <details>
+        <summary>Raw API response</summary>
+        <pre id="output">Run a simulation to see results.</pre>
+      </details>
+    </section>
+
+    <footer>
+      <a href="/docs">Open interactive API docs</a>
+      <span> · </span>
+      <a href="/api/health">Health check</a>
+    </footer>
+  </main>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
