@@ -150,3 +150,26 @@ The smoke test calls the same clean API that a future FastAPI endpoint will call
 ## Next architecture step
 
 The next recommended step is a **scenario comparison service** so the application can run a baseline and one or more changed parameter sets and return KPI differences and chart-ready series. After that, the same API can be placed behind FastAPI and Chart.js for deployment on Render.
+
+## Step 2: baseline vs scenario comparison
+
+The public API now includes `compare_scenarios()`:
+
+```python
+from econ_sim import SimulationConfig, compare_scenarios
+
+baseline = SimulationConfig.from_excel("data/Simulation_Settings.xlsx")
+comparison = compare_scenarios(
+    baseline,
+    {
+        "High tax": {"tax_rate": 0.30},
+        "Fast population growth": {"demographic_growth": 0.02},
+    },
+)
+
+print(comparison.kpi_table())
+```
+
+The comparison object also provides API-ready JSON via `comparison.to_dict()` and aligned yearly chart data via `comparison.yearly_metric(...)` / `comparison.yearly_dashboard()`.
+
+See `STEP2_SCENARIO_COMPARISON.md` for details.

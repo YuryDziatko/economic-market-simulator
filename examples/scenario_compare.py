@@ -1,21 +1,29 @@
-"""Minimal example of the API the future web app will use."""
+from pathlib import Path
+import sys
 
-from econ_sim import SimulationConfig, run_simulation
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+"""Step 2 example: compare multiple policy scenarios against one baseline."""
+
+from econ_sim import SimulationConfig, compare_scenarios
 
 
-base = SimulationConfig.from_excel("data/Simulation_Settings.xlsx").with_overrides(
+baseline = SimulationConfig.from_excel("data/Simulation_Settings.xlsx").with_overrides(
     simulation_years=3,
-    product_innovation_chance=0.005,  # keep this example quick
-)
-high_tax = base.with_overrides(
-    tax_rate=0.30,
-    government_consumption_share=0.75,
-    general_transfer_share=0.25,
-    government_reserve_share=0.00,
+    product_innovation_chance=0.005,
 )
 
-baseline_result = run_simulation(base)
-scenario_result = run_simulation(high_tax)
+comparison = compare_scenarios(
+    baseline,
+    {
+        "Higher income tax": {"tax_rate": 0.30},
+        "Higher population growth": {"demographic_growth": 0.02},
+        "Lower innovation": {"product_innovation_chance": 0.001},
+    },
+)
 
-print("BASELINE", baseline_result.summary())
-print("HIGH TAX", scenario_result.summary())
+print(comparison.kpi_table().to_string(index=False))
+print("\nGDP chart data:")
+print(comparison.yearly_metric("Real_GDP_Base_Prices").to_string(index=False))
