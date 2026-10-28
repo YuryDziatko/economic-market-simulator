@@ -107,3 +107,32 @@ footer { display: flex; gap: 10px; align-items: center; padding: 22px 2px 0; col
   .mode-switch { width: 100%; }
   .mode-button { flex: 1; }
 }
+
+/* Step 5: interpretation, validation and contextual help */
+.info-button { display: inline-grid; place-items: center; width: 18px; height: 18px; padding: 0; margin-left: 4px; border-radius: 50%; border: 1px solid #b8c7da; background: #f8fbff; color: #49627f; font-size: .68rem; font-weight: 850; cursor: help; vertical-align: 1px; position: relative; }
+.info-button:hover, .info-button:focus { border-color: #60a5fa; color: var(--blue-dark); outline: none; }
+.info-button::after { content: attr(data-tooltip); position: absolute; z-index: 30; left: 50%; bottom: calc(100% + 9px); transform: translateX(-50%) translateY(4px); width: min(300px, 70vw); padding: 10px 12px; border-radius: 10px; background: #10243b; color: white; font-size: .76rem; font-weight: 500; line-height: 1.45; box-shadow: 0 10px 30px rgba(15,41,66,.2); opacity: 0; pointer-events: none; transition: opacity .15s, transform .15s; }
+.info-button:hover::after, .info-button:focus::after { opacity: 1; transform: translateX(-50%) translateY(0); }
+.input-warnings { margin-top: 18px; border: 1px solid #f2d49b; background: #fffaf0; border-radius: 13px; padding: 13px 15px; color: #7a4a0a; }
+.input-warnings strong { color: #6a3c00; }
+.input-warnings ul { margin: 7px 0 0 18px; padding: 0; }
+.input-warnings li + li { margin-top: 4px; }
+.insight-grid { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 18px; margin: 20px 0; }
+.insight-panel { margin: 0; }
+.compact-heading { margin-bottom: 14px; }
+.status-badges { display: flex; flex-wrap: wrap; gap: 9px; }
+.status-badge { display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; padding: 8px 11px; font-size: .8rem; font-weight: 800; border: 1px solid transparent; }
+.status-badge.good { background: #edf9f1; color: #166534; border-color: #ccebd5; }
+.status-badge.neutral { background: #f2f6fb; color: #465a73; border-color: #dce6f1; }
+.status-badge.warning { background: #fff8e8; color: #8a5500; border-color: #f2dca7; }
+.status-badge.danger { background: #fff0f0; color: #a32121; border-color: #f0cccc; }
+.status-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.model-note { margin: 15px 0 0; color: var(--muted); font-size: .8rem; line-height: 1.5; }
+.interpretation { color: #34445d; line-height: 1.65; }
+.interpretation p { margin: 0 0 10px; }
+.interpretation ul { margin: 0; padding-left: 20px; }
+.interpretation li + li { margin-top: 7px; }
+.interpretation strong { color: var(--navy); }
+.card.alert .value { color: var(--danger); }
+.card.watch .value { color: #9a5b00; }
+@media (max-width: 900px) { .insight-grid { grid-template-columns: 1fr; } }

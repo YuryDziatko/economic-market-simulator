@@ -37,16 +37,16 @@
       <div class="settings-section">
         <h3>Economy</h3>
         <div class="grid">
-          <label>Years
+          <label>Years <button class="info-button" type="button" aria-label="About simulation years" data-tooltip="How many years the model runs. Longer simulations allow compounding effects such as population growth, product innovation and public debt to become much larger.">i</button>
             <input id="simulation_years" type="number" min="1" max="50" step="1">
           </label>
-          <label>Households
+          <label>Households <button class="info-button" type="button" aria-label="About households" data-tooltip="Starting household agents. In Phase 3 each household also represents part of the labor-force and consumption base.">i</button>
             <input id="num_households" type="number" min="10" step="1">
           </label>
-          <label>Companies
+          <label>Companies <button class="info-button" type="button" aria-label="About companies" data-tooltip="Starting producer agents. Firms can enter or exit markets as the simulation evolves.">i</button>
             <input id="num_companies" type="number" min="1" step="1">
           </label>
-          <label>Gini coefficient
+          <label>Gini coefficient <button class="info-button" type="button" aria-label="About Gini" data-tooltip="Starting income-inequality target. 0 means equal income; values closer to 1 mean more inequality.">i</button>
             <input id="target_gini" type="number" min="0" max="0.99" step="0.01">
           </label>
         </div>
@@ -55,16 +55,16 @@
       <div class="settings-section">
         <h3>Policy and growth <span class="hint">Enter percentages as normal numbers: 20 = 20%</span></h3>
         <div class="grid">
-          <label>Income tax <span class="unit">%</span>
+          <label>Income tax <button class="info-button" type="button" aria-label="About income tax" data-tooltip="Flat tax on household gross income. Tax revenue funds government purchases, transfers, unemployment benefits and debt service.">i</button> <span class="unit">%</span>
             <input id="tax_rate" type="number" min="0" max="100" step="0.5">
           </label>
-          <label>Corporate tax <span class="unit">%</span>
+          <label>Corporate tax <button class="info-button" type="button" aria-label="About corporate tax" data-tooltip="Tax proxy on positive business/capital income. Losses do not create negative tax revenue.">i</button> <span class="unit">%</span>
             <input id="corporate_profit_tax_rate" type="number" min="0" max="100" step="0.5">
           </label>
-          <label>Inflation target <span class="unit">%</span>
+          <label>Inflation target <button class="info-button" type="button" aria-label="About inflation target" data-tooltip="Background annual price pressure. Actual inflation can differ because shortages, surpluses and demand conditions also move prices.">i</button> <span class="unit">%</span>
             <input id="annual_inflation" type="number" min="-20" max="100" step="0.1">
           </label>
-          <label>Population growth <span class="unit">%</span>
+          <label>Population growth <button class="info-button" type="button" aria-label="About population growth" data-tooltip="Annual household growth. Enter 1 for 1%. High values compound quickly and can create very large labor-force growth.">i</button> <span class="unit">%</span>
             <input id="demographic_growth" type="number" min="-20" max="100" step="0.1">
           </label>
         </div>
@@ -73,22 +73,22 @@
       <details class="advanced-settings">
         <summary>Advanced settings</summary>
         <div class="grid advanced-grid">
-          <label>Productivity growth <span class="unit">%</span>
+          <label>Productivity growth <button class="info-button" type="button" aria-label="About productivity growth" data-tooltip="Annual labor-productivity growth. Higher productivity raises output capacity but can reduce workers needed for a given level of production.">i</button> <span class="unit">%</span>
             <input id="annual_labor_productivity_growth" type="number" min="-20" max="100" step="0.1">
           </label>
-          <label>New-product chance / month <span class="unit">%</span>
+          <label>New-product chance / month <button class="info-button" type="button" aria-label="About product innovation" data-tooltip="Monthly probability that each eligible product creates a new variant. Even small percentages compound strongly over long simulations.">i</button> <span class="unit">%</span>
             <input id="product_innovation_chance" type="number" min="0" max="100" step="0.1">
           </label>
-          <label>Unemployment benefit <span class="unit">% of wage</span>
+          <label>Unemployment benefit <button class="info-button" type="button" aria-label="About unemployment benefit" data-tooltip="Government transfer per unemployed worker unit as a share of the current average wage.">i</button> <span class="unit">% of wage</span>
             <input id="unemployment_transfer_rate" type="number" min="0" max="100" step="1">
           </label>
-          <label>Government purchases <span class="unit">% tax revenue</span>
+          <label>Government purchases <button class="info-button" type="button" aria-label="About government purchases" data-tooltip="Share of gross tax revenue directed to government demand for goods and services.">i</button> <span class="unit">% tax revenue</span>
             <input id="government_consumption_share" type="number" min="0" max="100" step="1">
           </label>
-          <label>General transfers <span class="unit">% tax revenue</span>
+          <label>General transfers <button class="info-button" type="button" aria-label="About general transfers" data-tooltip="Share of gross tax revenue redistributed to households using class transfer weights.">i</button> <span class="unit">% tax revenue</span>
             <input id="general_transfer_share" type="number" min="0" max="100" step="1">
           </label>
-          <label>Debt interest rate <span class="unit">%</span>
+          <label>Debt interest rate <button class="info-button" type="button" aria-label="About debt interest" data-tooltip="Annual interest charged on outstanding public debt. Higher rates increase government expenses when debt exists.">i</button> <span class="unit">%</span>
             <input id="debt_interest_rate" type="number" min="0" max="100" step="0.1">
           </label>
         </div>
@@ -105,19 +105,19 @@
           </label>
         </div>
         <div class="grid scenario-grid">
-          <label>Income tax <span class="unit">%</span>
+          <label>Income tax <button class="info-button" type="button" aria-label="About income tax" data-tooltip="Flat tax on household gross income. Tax revenue funds government purchases, transfers, unemployment benefits and debt service.">i</button> <span class="unit">%</span>
             <input id="scenario_tax_rate" type="number" min="0" max="100" step="0.5" placeholder="unchanged">
           </label>
-          <label>Corporate tax <span class="unit">%</span>
+          <label>Corporate tax <button class="info-button" type="button" aria-label="About corporate tax" data-tooltip="Tax proxy on positive business/capital income. Losses do not create negative tax revenue.">i</button> <span class="unit">%</span>
             <input id="scenario_corporate_profit_tax_rate" type="number" min="0" max="100" step="0.5" placeholder="unchanged">
           </label>
-          <label>Inflation target <span class="unit">%</span>
+          <label>Inflation target <button class="info-button" type="button" aria-label="About inflation target" data-tooltip="Background annual price pressure. Actual inflation can differ because shortages, surpluses and demand conditions also move prices.">i</button> <span class="unit">%</span>
             <input id="scenario_annual_inflation" type="number" min="-20" max="100" step="0.1" placeholder="unchanged">
           </label>
-          <label>Population growth <span class="unit">%</span>
+          <label>Population growth <button class="info-button" type="button" aria-label="About population growth" data-tooltip="Annual household growth. Enter 1 for 1%. High values compound quickly and can create very large labor-force growth.">i</button> <span class="unit">%</span>
             <input id="scenario_demographic_growth" type="number" min="-20" max="100" step="0.1" placeholder="unchanged">
           </label>
-          <label>Productivity growth <span class="unit">%</span>
+          <label>Productivity growth <button class="info-button" type="button" aria-label="About productivity growth" data-tooltip="Annual labor-productivity growth. Higher productivity raises output capacity but can reduce workers needed for a given level of production.">i</button> <span class="unit">%</span>
             <input id="scenario_annual_labor_productivity_growth" type="number" min="-20" max="100" step="0.1" placeholder="unchanged">
           </label>
           <label>New-product chance <span class="unit">%</span>
@@ -125,6 +125,8 @@
           </label>
         </div>
       </div>
+
+      <div id="inputWarnings" class="input-warnings hidden" role="status" aria-live="polite"></div>
 
       <div class="run-row">
         <button id="runButton" class="primary-button" type="button">Run simulation</button>
@@ -143,6 +145,22 @@
           <p id="resultSubtitle" class="result-subtitle"></p>
         </div>
         <div id="cards" class="cards"></div>
+      </section>
+
+      <section class="insight-grid">
+        <article class="panel insight-panel">
+          <div class="panel-heading compact-heading">
+            <div><p class="section-kicker">Signals</p><h2>Economic status</h2></div>
+          </div>
+          <div id="statusBadges" class="status-badges"></div>
+          <p class="model-note">These are diagnostic labels for this simulated economy, not a real-world forecast.</p>
+        </article>
+        <article class="panel insight-panel">
+          <div class="panel-heading compact-heading">
+            <div><p class="section-kicker">Interpretation</p><h2>What happened?</h2></div>
+          </div>
+          <div id="interpretation" class="interpretation"></div>
+        </article>
       </section>
 
       <section class="dashboard-grid">

@@ -66,3 +66,13 @@ def test_dashboard_home_contains_chartjs_and_compare_mode():
     assert "Compare scenario" in html
     assert "Enter percentages as normal numbers" in html
     assert "gdpChart" in html
+
+
+def test_dashboard_contains_step5_interpretation_features():
+    response = client.get("/")
+    assert response.status_code == 200
+    html = response.text
+    assert "Economic status" in html
+    assert "What happened?" in html
+    assert "inputWarnings" in html
+    assert "data-tooltip" in html

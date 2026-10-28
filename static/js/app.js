@@ -71,6 +71,175 @@ function signedAbsolute(value, digits = 3) {
   return `${n >= 0 ? "+" : ""}${n.toFixed(digits)}`;
 }
 
+
+function numberFromInput(id) {
+  const el = document.getElementById(id);
+  if (!el || el.value === "") return null;
+  const n = Number(el.value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function collectInputWarnings() {
+  const warnings = [];
+  const pop = numberFromInput("demographic_growth");
+  const inflation = numberFromInput("annual_inflation");
+  const incomeTax = numberFromInput("tax_rate");
+  const corpTax = numberFromInput("corporate_profit_tax_rate");
+  const innovation = numberFromInput("product_innovation_chance");
+  const productivity = numberFromInput("annual_labor_productivity_growth");
+  const gini = numberFromInput("target_gini");
+  const years = numberFromInput("simulation_years");
+  const gov = numberFromInput("government_consumption_share");
+  const transfers = numberFromInput("general_transfer_share");
+
+  if (pop !== null && Math.abs(pop) >= 5) warnings.push(`Population growth of ${pop}% per year compounds very quickly and can dominate labor-market results.`);
+  if (pop !== null && Math.abs(pop) >= 20) warnings.push("Population growth above ±20% is an extreme stress-test assumption rather than a typical demographic scenario.");
+  if (inflation !== null && inflation >= 10) warnings.push(`An inflation target of ${inflation}% is a high-inflation scenario.`);
+  if (inflation !== null && inflation < 0) warnings.push("A negative inflation target represents a deliberate deflation scenario.");
+  if (incomeTax !== null && incomeTax > 50) warnings.push(`Household income tax of ${incomeTax}% is a high-tax stress scenario.`);
+  if (corpTax !== null && corpTax > 50) warnings.push(`Corporate tax of ${corpTax}% is a high-tax stress scenario.`);
+  if (innovation !== null && innovation >= 5) warnings.push(`${innovation}% monthly product innovation compounds rapidly because many products can create variants.`);
+  if (productivity !== null && productivity >= 5) warnings.push(`${productivity}% annual labor-productivity growth can materially reduce labor needed per unit of output.`);
+  if (gini !== null && gini >= 0.60) warnings.push(`A starting Gini of ${gini.toFixed(2)} represents very high income inequality.`);
+  if (years !== null && years >= 25) warnings.push(`A ${years}-year simulation magnifies compounding assumptions; interpret long-horizon results cautiously.`);
+  if (gov !== null && transfers !== null && gov + transfers > 100) warnings.push("Government purchases plus general transfers exceed 100% of gross tax revenue and must be reduced.");
+  return warnings;
+}
+
+function renderInputWarnings() {
+  const box = document.getElementById("inputWarnings");
+  const warnings = collectInputWarnings();
+  if (!box) return;
+  if (warnings.length === 0) {
+    box.classList.add("hidden");
+    box.innerHTML = "";
+    return;
+  }
+  box.innerHTML = `<strong>Check these assumptions:</strong><ul>${warnings.map(w => `<li>${w}</li>`).join("")}</ul>`;
+  box.classList.remove("hidden");
+}
+
+function badge(label, value, tone = "neutral") {
+  return `<span class="status-badge ${tone}"><span class="status-dot"></span>${label}: ${value}</span>`;
+}
+
+function classifyGrowth(value) {
+  if (!Number.isFinite(value)) return ["Growth", "—", "neutral"];
+  if (value < 0) return ["Growth", `Recession ${pct(value)}`, "danger"];
+  if (value < 0.01) return ["Growth", `Weak ${pct(value)}`, "warning"];
+  if (value <= 0.035) return ["Growth", `Moderate ${pct(value)}`, "good"];
+  return ["Growth", `Rapid ${pct(value)}`, "warning"];
+}
+
+function classifyInflation(value, target) {
+  if (!Number.isFinite(value)) return ["Inflation", "—", "neutral"];
+  if (value < 0) return ["Inflation", `Deflation ${pct(value)}`, "danger"];
+  if (value >= 0.08) return ["Inflation", `Very high ${pct(value)}`, "danger"];
+  if (value >= 0.05) return ["Inflation", `High ${pct(value)}`, "warning"];
+  if (Number.isFinite(target) && Math.abs(value - target) <= 0.01) return ["Inflation", `Near target ${pct(value)}`, "good"];
+  return ["Inflation", pct(value), "neutral"];
+}
+
+function classifyUnemployment(value) {
+  if (!Number.isFinite(value)) return ["Unemployment", "—", "neutral"];
+  if (value >= 0.15) return ["Unemployment", `Severe ${pct(value)}`, "danger"];
+  if (value >= 0.10) return ["Unemployment", `High ${pct(value)}`, "danger"];
+  if (value >= 0.06) return ["Unemployment", `Elevated ${pct(value)}`, "warning"];
+  return ["Unemployment", `Low ${pct(value)}`, "good"];
+}
+
+function classifyDebt(value) {
+  if (!Number.isFinite(value)) return ["Debt / GDP", "—", "neutral"];
+  if (value >= 1.0) return ["Debt / GDP", `High ${pct(value)}`, "danger"];
+  if (value >= 0.60) return ["Debt / GDP", `Elevated ${pct(value)}`, "warning"];
+  return ["Debt / GDP", pct(value), "good"];
+}
+
+function classifyGini(value) {
+  if (!Number.isFinite(value)) return ["Inequality", "—", "neutral"];
+  if (value >= 0.50) return ["Inequality", `Very high ${decimal(value)}`, "danger"];
+  if (value >= 0.40) return ["Inequality", `High ${decimal(value)}`, "warning"];
+  return ["Inequality", decimal(value), "neutral"];
+}
+
+function renderStatusBadges(summary, targetInflation) {
+  const items = [
+    classifyGrowth(Number(summary.real_gdp_growth)),
+    classifyInflation(Number(summary.inflation), Number(targetInflation)),
+    classifyUnemployment(Number(summary.unemployment_rate)),
+    classifyGini(Number(summary.income_gini)),
+    classifyDebt(Number(summary.public_debt_to_gdp)),
+  ];
+  document.getElementById("statusBadges").innerHTML = items.map(x => badge(...x)).join("");
+}
+
+function trendDirection(first, last, tolerance = 1e-9) {
+  if (!Number.isFinite(first) || !Number.isFinite(last)) return "unknown";
+  if (last > first + tolerance) return "rose";
+  if (last < first - tolerance) return "fell";
+  return "was broadly unchanged";
+}
+
+function renderSingleInterpretation(summary, yearly, config) {
+  const final = yearly[yearly.length - 1] || {};
+  const first = yearly[0] || {};
+  const growth = Number(summary.real_gdp_growth);
+  const inflation = Number(summary.inflation);
+  const unemployment = Number(summary.unemployment_rate);
+  const gini = Number(summary.income_gini);
+  const debt = Number(summary.public_debt_to_gdp);
+  const bullets = [];
+
+  if (Number.isFinite(growth)) {
+    bullets.push(growth < 0
+      ? `The economy ended in <strong>recession</strong>, with real GDP ${pct(growth)} year over year.`
+      : `Real output ended ${pct(growth)} above the prior year. This measures quantity/output growth after removing price changes.`);
+  }
+  if (Number.isFinite(inflation)) {
+    const target = Number(config?.annual_inflation);
+    const targetText = Number.isFinite(target) ? ` versus the ${pct(target)} background target` : "";
+    bullets.push(inflation < 0
+      ? `The final year had <strong>deflation</strong> of ${pct(inflation)}${targetText}, meaning simulated prices fell overall.`
+      : `Inflation finished at ${pct(inflation)}${targetText}. Inflation and real GDP growth do not need to be similar because one measures prices and the other measures real output.`);
+  }
+  if (Number.isFinite(unemployment)) {
+    if (unemployment >= 0.10) bullets.push(`<strong>Unemployment is high at ${pct(unemployment)}</strong>. In this model that means labor supply substantially exceeds employment demand generated by production; population and productivity assumptions can amplify this gap.`);
+    else bullets.push(`Unemployment ended at ${pct(unemployment)}, indicating ${unemployment < .06 ? "a relatively tight" : "some slack in the"} simulated labor market.`);
+  }
+  if (Number.isFinite(gini)) bullets.push(`Income inequality ended at a Gini of ${decimal(gini)}; the class-average Gini ${trendDirection(Number(first.Income_Gini_End_Class_Average), Number(final.Income_Gini_End_Class_Average))} over the displayed period.`);
+  if (Number.isFinite(debt)) bullets.push(`Public debt finished at ${pct(debt)} of nominal GDP. The debt ratio reflects accumulated fiscal deficits/surpluses plus debt interest.`);
+
+  const startProducts = Number(summary.starting_products);
+  const finalProducts = Number(summary.final_products);
+  if (Number.isFinite(startProducts) && Number.isFinite(finalProducts) && finalProducts !== startProducts) {
+    bullets.push(`Product variety changed from ${integer(startProducts)} to ${integer(finalProducts)} products as the monthly innovation mechanism created new variants.`);
+  }
+
+  document.getElementById("interpretation").innerHTML = `<p><strong>Model reading:</strong> these outcomes describe the internal simulation under your assumptions.</p><ul>${bullets.map(b => `<li>${b}</li>`).join("")}</ul>`;
+}
+
+function renderComparisonInterpretation(data, scenarioName) {
+  const base = data.summaries.Baseline;
+  const scenario = data.summaries[scenarioName];
+  const rows = data.kpis.filter(row => row.Scenario === scenarioName);
+  const byKey = Object.fromEntries(rows.map(row => [row.KPI, row]));
+  const bullets = [];
+
+  const gdp = byKey.real_gdp_growth;
+  if (gdp) bullets.push(`Real GDP growth is ${signedPctPoint(gdp.Delta_Percentage_Points)} relative to baseline.`);
+  const inf = byKey.inflation;
+  if (inf) bullets.push(`Inflation is ${signedPctPoint(inf.Delta_Percentage_Points)} relative to baseline.`);
+  const un = byKey.unemployment_rate;
+  if (un) bullets.push(`Unemployment is ${signedPctPoint(un.Delta_Percentage_Points)} relative to baseline.`);
+  const gi = byKey.income_gini;
+  if (gi) bullets.push(`Income Gini changes by ${signedAbsolute(gi.Delta_Absolute)}; a negative value means the scenario is more equal than baseline.`);
+  const dg = byKey.public_debt_to_gdp;
+  if (dg) bullets.push(`Debt/GDP is ${signedPctPoint(dg.Delta_Percentage_Points)} relative to baseline.`);
+
+  const direction = Number(scenario.nominal_gdp) >= Number(base.nominal_gdp) ? "larger" : "smaller";
+  document.getElementById("interpretation").innerHTML = `<p><strong>${scenarioName}</strong> ends with a ${direction} nominal economy than the baseline. The bullets below isolate the main final-year differences while both runs use the same random seed.</p><ul>${bullets.map(b => `<li>${b}</li>`).join("")}</ul>`;
+}
+
 function setStatus(message, isError = false) {
   const status = document.getElementById("status");
   status.textContent = message;
@@ -92,6 +261,7 @@ async function loadDefaults() {
     defaults = data.defaults;
     baselineFields.forEach(key => setInputFromConfig(key, defaults[key]));
     setStatus("Ready. Percentage fields use normal percent values (for example, 1 = 1%).");
+    renderInputWarnings();
   } catch (error) {
     setStatus(error.message, true);
   }
@@ -374,6 +544,8 @@ async function runSingle(overrides) {
 
   renderSingleCards(data.summary, data.yearly);
   renderSingleCharts(data.yearly);
+  renderStatusBadges(data.summary, data.config?.annual_inflation);
+  renderSingleInterpretation(data.summary, data.yearly, data.config);
   document.getElementById("resultTitle").textContent = "Final-year snapshot";
   document.getElementById("resultSubtitle").textContent = `Year ${data.summary.final_year} outcome from a ${overrides.simulation_years}-year simulation.`;
   document.getElementById("comparisonTablePanel").classList.add("hidden");
@@ -398,6 +570,8 @@ async function runComparison(baselineOverrides) {
   renderComparisonCards(data);
   renderComparisonCharts(data.yearly, data.summaries, scenarioName);
   renderComparisonTable(data);
+  renderStatusBadges(data.summaries[scenarioName], scenarioOverrides?.annual_inflation ?? baselineOverrides?.annual_inflation ?? defaults?.annual_inflation);
+  renderComparisonInterpretation(data, scenarioName);
   document.getElementById("resultTitle").textContent = `${scenarioName} vs baseline`;
   document.getElementById("resultSubtitle").textContent = "Both simulations use the same random seed, so the differences primarily reflect the settings you changed.";
   return data;
@@ -436,6 +610,7 @@ function resetDefaults() {
   document.querySelectorAll("#scenarioPanel input[type='number']").forEach(el => { el.value = ""; });
   document.getElementById("scenario_name").value = "Alternative policy";
   setStatus("Baseline settings restored.");
+  renderInputWarnings();
 }
 
 document.querySelectorAll(".mode-button").forEach(button => {
@@ -443,5 +618,9 @@ document.querySelectorAll(".mode-button").forEach(button => {
 });
 document.getElementById("runButton").addEventListener("click", runDashboard);
 document.getElementById("resetButton").addEventListener("click", resetDefaults);
+document.querySelectorAll(".controls-panel input").forEach(el => {
+  el.addEventListener("input", renderInputWarnings);
+  el.addEventListener("change", renderInputWarnings);
+});
 
 loadDefaults();

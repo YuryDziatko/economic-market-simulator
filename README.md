@@ -224,3 +224,7 @@ uvicorn web_main:app --reload
 ```
 
 Then open `http://127.0.0.1:8000/`.
+
+## Step 5 — UX and automatic interpretation
+
+The dashboard now includes contextual parameter help, live warnings for extreme assumptions, economic-status badges, and a plain-English interpretation panel for both single runs and scenario comparisons. The interpretation describes model outputs; it is not a real-world economic forecast.
