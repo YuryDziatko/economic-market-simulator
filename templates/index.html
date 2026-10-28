@@ -5,46 +5,197 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ title }}</title>
   <link rel="stylesheet" href="/static/css/app.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
+  <script src="/static/js/app.js" defer></script>
 </head>
 <body>
   <main class="container">
-    <header>
-      <p class="eyebrow">Step 3 · FastAPI MVP</p>
-      <h1>Economic Market Simulator</h1>
-      <p>Change a few assumptions and run the same Python economics engine from your browser.</p>
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Economic Market Simulator · Dashboard</p>
+        <h1>See how policy choices change the economy.</h1>
+        <p class="hero-copy">Run the model from your browser, follow the economy year by year, or compare a policy scenario against the same baseline economy.</p>
+      </div>
+      <div class="hero-links">
+        <a href="/docs">API docs</a>
+        <a href="/api/health">Health</a>
+      </div>
     </header>
 
-    <section class="panel">
-      <h2>Simulation settings</h2>
-      <div class="grid">
-        <label>Years <input id="simulation_years" type="number" min="1" max="50" value="3"></label>
-        <label>Households <input id="num_households" type="number" min="10" value="1000"></label>
-        <label>Companies <input id="num_companies" type="number" min="1" value="1000"></label>
-        <label>Gini <input id="target_gini" type="number" min="0" max="0.99" step="0.01" value="0.30"></label>
-        <label>Income tax <input id="tax_rate" type="number" min="0" max="1" step="0.01" value="0.20"></label>
-        <label>Corporate tax <input id="corporate_profit_tax_rate" type="number" min="0" max="1" step="0.01" value="0.20"></label>
-        <label>Inflation target <input id="annual_inflation" type="number" step="0.005" value="0.02"></label>
-        <label>Population growth <input id="demographic_growth" type="number" step="0.005" value="0.01"></label>
+    <section class="panel controls-panel">
+      <div class="panel-heading">
+        <div>
+          <p class="section-kicker">Inputs</p>
+          <h2>Simulation settings</h2>
+        </div>
+        <div class="mode-switch" role="group" aria-label="Simulation mode">
+          <button class="mode-button active" data-mode="single" type="button">Single run</button>
+          <button class="mode-button" data-mode="compare" type="button">Compare scenario</button>
+        </div>
       </div>
-      <button id="runButton">Run simulation</button>
-      <p id="status" class="status"></p>
+
+      <div class="settings-section">
+        <h3>Economy</h3>
+        <div class="grid">
+          <label>Years
+            <input id="simulation_years" type="number" min="1" max="50" step="1">
+          </label>
+          <label>Households
+            <input id="num_households" type="number" min="10" step="1">
+          </label>
+          <label>Companies
+            <input id="num_companies" type="number" min="1" step="1">
+          </label>
+          <label>Gini coefficient
+            <input id="target_gini" type="number" min="0" max="0.99" step="0.01">
+          </label>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>Policy and growth <span class="hint">Enter percentages as normal numbers: 20 = 20%</span></h3>
+        <div class="grid">
+          <label>Income tax <span class="unit">%</span>
+            <input id="tax_rate" type="number" min="0" max="100" step="0.5">
+          </label>
+          <label>Corporate tax <span class="unit">%</span>
+            <input id="corporate_profit_tax_rate" type="number" min="0" max="100" step="0.5">
+          </label>
+          <label>Inflation target <span class="unit">%</span>
+            <input id="annual_inflation" type="number" min="-20" max="100" step="0.1">
+          </label>
+          <label>Population growth <span class="unit">%</span>
+            <input id="demographic_growth" type="number" min="-20" max="100" step="0.1">
+          </label>
+        </div>
+      </div>
+
+      <details class="advanced-settings">
+        <summary>Advanced settings</summary>
+        <div class="grid advanced-grid">
+          <label>Productivity growth <span class="unit">%</span>
+            <input id="annual_labor_productivity_growth" type="number" min="-20" max="100" step="0.1">
+          </label>
+          <label>New-product chance / month <span class="unit">%</span>
+            <input id="product_innovation_chance" type="number" min="0" max="100" step="0.1">
+          </label>
+          <label>Unemployment benefit <span class="unit">% of wage</span>
+            <input id="unemployment_transfer_rate" type="number" min="0" max="100" step="1">
+          </label>
+          <label>Government purchases <span class="unit">% tax revenue</span>
+            <input id="government_consumption_share" type="number" min="0" max="100" step="1">
+          </label>
+          <label>General transfers <span class="unit">% tax revenue</span>
+            <input id="general_transfer_share" type="number" min="0" max="100" step="1">
+          </label>
+          <label>Debt interest rate <span class="unit">%</span>
+            <input id="debt_interest_rate" type="number" min="0" max="100" step="0.1">
+          </label>
+        </div>
+      </details>
+
+      <div id="scenarioPanel" class="scenario-panel hidden">
+        <div class="scenario-heading">
+          <div>
+            <h3>Scenario overrides</h3>
+            <p>Leave a field blank to keep the baseline value. Both runs use the same random seed.</p>
+          </div>
+          <label class="scenario-name">Scenario name
+            <input id="scenario_name" type="text" value="Alternative policy" maxlength="60">
+          </label>
+        </div>
+        <div class="grid scenario-grid">
+          <label>Income tax <span class="unit">%</span>
+            <input id="scenario_tax_rate" type="number" min="0" max="100" step="0.5" placeholder="unchanged">
+          </label>
+          <label>Corporate tax <span class="unit">%</span>
+            <input id="scenario_corporate_profit_tax_rate" type="number" min="0" max="100" step="0.5" placeholder="unchanged">
+          </label>
+          <label>Inflation target <span class="unit">%</span>
+            <input id="scenario_annual_inflation" type="number" min="-20" max="100" step="0.1" placeholder="unchanged">
+          </label>
+          <label>Population growth <span class="unit">%</span>
+            <input id="scenario_demographic_growth" type="number" min="-20" max="100" step="0.1" placeholder="unchanged">
+          </label>
+          <label>Productivity growth <span class="unit">%</span>
+            <input id="scenario_annual_labor_productivity_growth" type="number" min="-20" max="100" step="0.1" placeholder="unchanged">
+          </label>
+          <label>New-product chance <span class="unit">%</span>
+            <input id="scenario_product_innovation_chance" type="number" min="0" max="100" step="0.1" placeholder="unchanged">
+          </label>
+        </div>
+      </div>
+
+      <div class="run-row">
+        <button id="runButton" class="primary-button" type="button">Run simulation</button>
+        <button id="resetButton" class="secondary-button" type="button">Reset defaults</button>
+        <p id="status" class="status" aria-live="polite">Loading baseline settings…</p>
+      </div>
     </section>
 
-    <section class="panel">
-      <h2>Result</h2>
-      <div id="cards" class="cards"></div>
-      <details>
-        <summary>Raw API response</summary>
-        <pre id="output">Run a simulation to see results.</pre>
-      </details>
+    <section id="results" class="results hidden">
+      <section class="panel">
+        <div class="panel-heading result-heading">
+          <div>
+            <p class="section-kicker">Outcome</p>
+            <h2 id="resultTitle">Final-year snapshot</h2>
+          </div>
+          <p id="resultSubtitle" class="result-subtitle"></p>
+        </div>
+        <div id="cards" class="cards"></div>
+      </section>
+
+      <section class="dashboard-grid">
+        <article class="chart-card chart-card-wide">
+          <div class="chart-heading"><h3>Real GDP</h3><p>Output valued at base-period prices.</p></div>
+          <div class="chart-wrap"><canvas id="gdpChart"></canvas></div>
+        </article>
+        <article class="chart-card">
+          <div class="chart-heading"><h3>Real GDP growth</h3><p>Annual change in real output.</p></div>
+          <div class="chart-wrap"><canvas id="gdpGrowthChart"></canvas></div>
+        </article>
+        <article class="chart-card">
+          <div class="chart-heading"><h3>Inflation</h3><p>Annual change in the simulated price level.</p></div>
+          <div class="chart-wrap"><canvas id="inflationChart"></canvas></div>
+        </article>
+        <article class="chart-card">
+          <div class="chart-heading"><h3>Unemployment</h3><p>Share of the labor force without employment.</p></div>
+          <div class="chart-wrap"><canvas id="unemploymentChart"></canvas></div>
+        </article>
+        <article class="chart-card">
+          <div class="chart-heading"><h3>Income Gini</h3><p>Higher values indicate greater income inequality.</p></div>
+          <div class="chart-wrap"><canvas id="giniChart"></canvas></div>
+        </article>
+        <article class="chart-card">
+          <div class="chart-heading"><h3>Public debt / GDP</h3><p>Public debt relative to nominal GDP.</p></div>
+          <div class="chart-wrap"><canvas id="debtChart"></canvas></div>
+        </article>
+        <article class="chart-card chart-card-wide">
+          <div class="chart-heading"><h3>Economic scale</h3><p>Households, companies and products as the economy evolves.</p></div>
+          <div class="chart-wrap"><canvas id="scaleChart"></canvas></div>
+        </article>
+      </section>
+
+      <section id="comparisonTablePanel" class="panel hidden">
+        <div class="panel-heading">
+          <div><p class="section-kicker">Comparison</p><h2>Baseline vs scenario</h2></div>
+        </div>
+        <div class="table-scroll"><table id="comparisonTable"></table></div>
+      </section>
+
+      <section class="panel raw-panel">
+        <details>
+          <summary>Raw API response</summary>
+          <pre id="output"></pre>
+        </details>
+      </section>
     </section>
 
     <footer>
-      <a href="/docs">Open interactive API docs</a>
-      <span> · </span>
-      <a href="/api/health">Health check</a>
+      <span>Economic Market Simulator</span>
+      <span>·</span>
+      <a href="/docs">Interactive API documentation</a>
     </footer>
   </main>
-  <script src="/static/js/app.js"></script>
 </body>
 </html>

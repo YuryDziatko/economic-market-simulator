@@ -55,3 +55,14 @@ def test_compare_endpoint_smoke():
 def test_unknown_config_field_rejected():
     response = client.post("/api/simulate", json={"overrides": {"not_a_real_setting": 10}})
     assert response.status_code == 422
+
+
+def test_dashboard_home_contains_chartjs_and_compare_mode():
+    response = client.get("/")
+    assert response.status_code == 200
+    html = response.text
+    assert "Chart.js" not in html  # library is loaded by its script URL, not visible copy
+    assert "chart.umd.min.js" in html
+    assert "Compare scenario" in html
+    assert "Enter percentages as normal numbers" in html
+    assert "gdpChart" in html

@@ -202,3 +202,25 @@ Then open:
 The API returns JSON-ready KPI and yearly data. Detailed product/company tables remain internal for now so normal API responses do not become unnecessarily large.
 
 See `STEP3_FASTAPI.md` for request examples and Render deployment notes.
+
+
+## Step 4: Chart.js dashboard
+
+The browser UI at `/` is now a real simulation dashboard. It includes:
+
+- human-readable percentage inputs (`20` means 20%, not `0.20`),
+- settings loaded from `/api/config`,
+- single-run and baseline-vs-scenario modes,
+- final-year KPI cards,
+- Chart.js charts for real GDP, real GDP growth, inflation, unemployment, Gini, debt/GDP, and economic scale,
+- a baseline/scenario comparison table,
+- raw API output for debugging.
+
+Run locally:
+
+```bash
+pip install -r requirements.txt
+uvicorn web_main:app --reload
+```
+
+Then open `http://127.0.0.1:8000/`.
