@@ -228,3 +228,29 @@ Then open `http://127.0.0.1:8000/`.
 ## Step 5 — UX and automatic interpretation
 
 The dashboard now includes contextual parameter help, live warnings for extreme assumptions, economic-status badges, and a plain-English interpretation panel for both single runs and scenario comparisons. The interpretation describes model outputs; it is not a real-world economic forecast.
+
+## Step 6 — Downloadable reports and saved scenario presets
+
+The dashboard now supports reusable scenario presets and report downloads without requiring user accounts or a database.
+
+### Presets
+
+Built-in examples include higher/lower income tax, inflation shock, population boom, productivity boom, innovation boom, and a demand-squeeze stress test. In Compare mode, users can also save the current scenario in browser `localStorage`, apply it later, or delete it. Custom presets stay on that browser/device only.
+
+### Downloadable reports
+
+After a successful single simulation or comparison, the dashboard shows:
+
+- **Download Excel** — formatted multi-sheet `.xlsx` report;
+- **Download CSV ZIP** — core model outputs as CSV/JSON files in one `.zip`.
+
+The report endpoints are stateless. They re-run the last submitted settings and build the report in memory, so they work on Render without persistent disk storage.
+
+New endpoints:
+
+- `POST /api/reports/simulation.xlsx`
+- `POST /api/reports/simulation.zip`
+- `POST /api/reports/comparison.xlsx`
+- `POST /api/reports/comparison.zip`
+
+Long `product_monthly` output is intentionally omitted from standard downloadable reports because product innovation can make it extremely large. It remains available internally in `SimulationResult` and in local `save=True` runs.

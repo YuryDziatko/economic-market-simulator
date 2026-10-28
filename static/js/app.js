@@ -25,7 +25,19 @@ const scenarioPercentFields = new Set([
 
 let defaults = null;
 let currentMode = "single";
+let lastRunRequest = null;
 const charts = {};
+
+const PRESET_STORAGE_KEY = "economic-market-simulator-presets-v1";
+const BUILTIN_PRESETS = [
+  { name: "Higher income tax", overrides: { tax_rate: 0.30 } },
+  { name: "Lower income tax", overrides: { tax_rate: 0.10 } },
+  { name: "Inflation shock", overrides: { annual_inflation: 0.08 } },
+  { name: "Population boom", overrides: { demographic_growth: 0.03 } },
+  { name: "Productivity boom", overrides: { annual_labor_productivity_growth: 0.04 } },
+  { name: "Innovation boom", overrides: { product_innovation_chance: 0.05 } },
+  { name: "Demand-squeeze stress", overrides: { tax_rate: 0.35, corporate_profit_tax_rate: 0.30, product_innovation_chance: 0.0 } },
+];
 
 const moneyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency", currency: "USD", maximumFractionDigits: 0,
@@ -240,6 +252,143 @@ function renderComparisonInterpretation(data, scenarioName) {
   document.getElementById("interpretation").innerHTML = `<p><strong>${scenarioName}</strong> ends with a ${direction} nominal economy than the baseline. The bullets below isolate the main final-year differences while both runs use the same random seed.</p><ul>${bullets.map(b => `<li>${b}</li>`).join("")}</ul>`;
 }
 
+
+function getCustomPresets() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PRESET_STORAGE_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.filter(x => x && x.name && x.overrides) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function saveCustomPresets(presets) {
+  localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(presets));
+}
+
+function renderPresetOptions(selectedValue = "") {
+  const select = document.getElementById("presetSelect");
+  if (!select) return;
+  const builtins = BUILTIN_PRESETS.map((preset, i) => `<option value="builtin:${i}">${preset.name}</option>`).join("");
+  const custom = getCustomPresets();
+  const customs = custom.length
+    ? `<optgroup label="Saved in this browser">${custom.map((preset, i) => `<option value="custom:${i}">${preset.name}</option>`).join("")}</optgroup>`
+    : "";
+  select.innerHTML = `<option value="">Choose a preset…</option><optgroup label="Built-in">${builtins}</optgroup>${customs}`;
+  if (selectedValue) select.value = selectedValue;
+}
+
+function selectedPreset() {
+  const value = document.getElementById("presetSelect")?.value || "";
+  if (!value) return null;
+  const [kind, indexText] = value.split(":");
+  const index = Number(indexText);
+  if (kind === "builtin") return { ...BUILTIN_PRESETS[index], kind, index };
+  const custom = getCustomPresets();
+  if (kind === "custom" && custom[index]) return { ...custom[index], kind, index };
+  return null;
+}
+
+function clearScenarioInputs() {
+  document.querySelectorAll("#scenarioPanel input[type='number']").forEach(el => { el.value = ""; });
+}
+
+function applyPreset() {
+  const preset = selectedPreset();
+  if (!preset) {
+    setStatus("Choose a preset first.", true);
+    return;
+  }
+  clearScenarioInputs();
+  for (const [key, value] of Object.entries(preset.overrides)) {
+    const el = document.getElementById(`scenario_${key}`);
+    if (!el) continue;
+    el.value = scenarioPercentFields.has(key) ? Number(value) * 100 : value;
+  }
+  document.getElementById("scenario_name").value = preset.name;
+  setStatus(`Preset applied: ${preset.name}.`);
+}
+
+function saveCurrentPreset() {
+  try {
+    const name = document.getElementById("scenario_name").value.trim();
+    if (!name) throw new Error("Enter a scenario name before saving a preset.");
+    const overrides = readScenarioOverrides();
+    const presets = getCustomPresets();
+    const existing = presets.findIndex(p => p.name.toLowerCase() === name.toLowerCase());
+    const saved = { name, overrides };
+    if (existing >= 0) presets[existing] = saved;
+    else presets.push(saved);
+    saveCustomPresets(presets);
+    const index = existing >= 0 ? existing : presets.length - 1;
+    renderPresetOptions(`custom:${index}`);
+    setStatus(`Saved “${name}” in this browser.`);
+  } catch (error) {
+    setStatus(error.message || String(error), true);
+  }
+}
+
+function deleteCurrentPreset() {
+  const preset = selectedPreset();
+  if (!preset || preset.kind !== "custom") {
+    setStatus("Only custom browser presets can be deleted.", true);
+    return;
+  }
+  const presets = getCustomPresets();
+  presets.splice(preset.index, 1);
+  saveCustomPresets(presets);
+  renderPresetOptions();
+  setStatus(`Deleted custom preset “${preset.name}”.`);
+}
+
+function reportEndpoint(format) {
+  if (!lastRunRequest) return null;
+  const prefix = lastRunRequest.mode === "compare" ? "comparison" : "simulation";
+  return `/api/reports/${prefix}.${format}`;
+}
+
+async function downloadLastReport(format) {
+  if (!lastRunRequest) {
+    setStatus("Run a simulation or comparison before downloading a report.", true);
+    return;
+  }
+  const excelButton = document.getElementById("downloadExcelButton");
+  const csvButton = document.getElementById("downloadCsvButton");
+  excelButton.disabled = true;
+  csvButton.disabled = true;
+  setStatus(`Generating ${format === "xlsx" ? "Excel" : "CSV ZIP"} report…`);
+  try {
+    const response = await fetch(reportEndpoint(format), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(lastRunRequest.body),
+    });
+    if (!response.ok) {
+      let detail = "Report generation failed";
+      try { const data = await response.json(); detail = data.detail || detail; } catch (_) {}
+      throw new Error(detail);
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const match = disposition.match(/filename="?([^";]+)"?/i);
+    const filename = match ? match[1] : `economic_report.${format === "xlsx" ? "xlsx" : "zip"}`;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setStatus(`Downloaded ${filename}.`);
+  } catch (error) {
+    setStatus(error.message || String(error), true);
+  } finally {
+    excelButton.disabled = false;
+    csvButton.disabled = false;
+  }
+}
+
 function setStatus(message, isError = false) {
   const status = document.getElementById("status");
   status.textContent = message;
@@ -260,6 +409,7 @@ async function loadDefaults() {
     if (!response.ok) throw new Error(data.detail || "Could not load settings");
     defaults = data.defaults;
     baselineFields.forEach(key => setInputFromConfig(key, defaults[key]));
+    renderPresetOptions();
     setStatus("Ready. Percentage fields use normal percent values (for example, 1 = 1%).");
     renderInputWarnings();
   } catch (error) {
@@ -315,6 +465,8 @@ function setMode(mode) {
   document.getElementById("scenarioPanel").classList.toggle("hidden", mode !== "compare");
   document.getElementById("runButton").textContent = mode === "compare" ? "Compare scenario" : "Run simulation";
   document.getElementById("comparisonTablePanel").classList.add("hidden");
+  lastRunRequest = null;
+  document.getElementById("reportActions")?.classList.add("hidden");
 }
 
 function destroyCharts() {
@@ -541,6 +693,7 @@ async function runSingle(overrides) {
   });
   const data = await response.json();
   if (!response.ok) throw new Error(data.detail || "Simulation failed");
+  lastRunRequest = { mode: "single", body: { overrides, include_monthly: false } };
 
   renderSingleCards(data.summary, data.yearly);
   renderSingleCharts(data.yearly);
@@ -555,17 +708,19 @@ async function runSingle(overrides) {
 async function runComparison(baselineOverrides) {
   const scenarioName = document.getElementById("scenario_name").value.trim() || "Alternative policy";
   const scenarioOverrides = readScenarioOverrides();
+  const requestBody = {
+    baseline_name: "Baseline",
+    baseline_overrides: baselineOverrides,
+    scenarios: { [scenarioName]: scenarioOverrides },
+  };
   const response = await fetch("/api/compare", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      baseline_name: "Baseline",
-      baseline_overrides: baselineOverrides,
-      scenarios: { [scenarioName]: scenarioOverrides },
-    }),
+    body: JSON.stringify(requestBody),
   });
   const data = await response.json();
   if (!response.ok) throw new Error(data.detail || "Scenario comparison failed");
+  lastRunRequest = { mode: "compare", body: requestBody };
 
   renderComparisonCards(data);
   renderComparisonCharts(data.yearly, data.summaries, scenarioName);
@@ -593,6 +748,7 @@ async function runDashboard() {
     const data = currentMode === "compare" ? await runComparison(overrides) : await runSingle(overrides);
     output.textContent = JSON.stringify(data, null, 2);
     document.getElementById("results").classList.remove("hidden");
+    document.getElementById("reportActions").classList.remove("hidden");
     setStatus("Simulation complete.");
     document.getElementById("results").scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
@@ -609,6 +765,8 @@ function resetDefaults() {
   baselineFields.forEach(key => setInputFromConfig(key, defaults[key]));
   document.querySelectorAll("#scenarioPanel input[type='number']").forEach(el => { el.value = ""; });
   document.getElementById("scenario_name").value = "Alternative policy";
+  lastRunRequest = null;
+  document.getElementById("reportActions")?.classList.add("hidden");
   setStatus("Baseline settings restored.");
   renderInputWarnings();
 }
@@ -618,6 +776,11 @@ document.querySelectorAll(".mode-button").forEach(button => {
 });
 document.getElementById("runButton").addEventListener("click", runDashboard);
 document.getElementById("resetButton").addEventListener("click", resetDefaults);
+document.getElementById("applyPresetButton").addEventListener("click", applyPreset);
+document.getElementById("savePresetButton").addEventListener("click", saveCurrentPreset);
+document.getElementById("deletePresetButton").addEventListener("click", deleteCurrentPreset);
+document.getElementById("downloadExcelButton").addEventListener("click", () => downloadLastReport("xlsx"));
+document.getElementById("downloadCsvButton").addEventListener("click", () => downloadLastReport("zip"));
 document.querySelectorAll(".controls-panel input").forEach(el => {
   el.addEventListener("input", renderInputWarnings);
   el.addEventListener("change", renderInputWarnings);

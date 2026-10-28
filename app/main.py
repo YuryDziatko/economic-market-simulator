@@ -18,7 +18,7 @@ app = FastAPI(
         "Run configurable economic simulations and compare policy scenarios. "
         "The economics engine is exposed through SimulationConfig and run_simulation()."
     ),
-    version="0.4.0",
+    version="0.6.0",
 )
 
 app.include_router(api_router)

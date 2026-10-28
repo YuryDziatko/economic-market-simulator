@@ -76,3 +76,39 @@ def test_dashboard_contains_step5_interpretation_features():
     assert "What happened?" in html
     assert "inputWarnings" in html
     assert "data-tooltip" in html
+
+
+def test_step6_simulation_reports_download():
+    payload = {"overrides": quick_overrides(), "include_monthly": False}
+
+    excel = client.post("/api/reports/simulation.xlsx", json=payload)
+    assert excel.status_code == 200
+    assert "spreadsheetml.sheet" in excel.headers["content-type"]
+    assert excel.content[:2] == b"PK"  # XLSX is a ZIP container
+
+    csv_zip = client.post("/api/reports/simulation.zip", json=payload)
+    assert csv_zip.status_code == 200
+    assert csv_zip.headers["content-type"] == "application/zip"
+    assert csv_zip.content[:2] == b"PK"
+
+
+def test_step6_comparison_report_download():
+    payload = {
+        "baseline_overrides": quick_overrides(),
+        "scenarios": {"Higher tax": {"tax_rate": 0.30}},
+        "baseline_name": "Baseline",
+    }
+    response = client.post("/api/reports/comparison.xlsx", json=payload)
+    assert response.status_code == 200
+    assert "economic_scenario_comparison.xlsx" in response.headers["content-disposition"]
+    assert response.content[:2] == b"PK"
+
+
+def test_dashboard_contains_step6_presets_and_downloads():
+    response = client.get("/")
+    assert response.status_code == 200
+    html = response.text
+    assert "Scenario presets" in html
+    assert "Save current" in html
+    assert "Download Excel" in html
+    assert "Download CSV ZIP" in html

@@ -104,6 +104,18 @@
             <input id="scenario_name" type="text" value="Alternative policy" maxlength="60">
           </label>
         </div>
+        <div class="preset-toolbar">
+          <div class="preset-copy">
+            <strong>Scenario presets</strong>
+            <span>Use a built-in example or save your own preset in this browser.</span>
+          </div>
+          <div class="preset-actions">
+            <select id="presetSelect" aria-label="Scenario preset"></select>
+            <button id="applyPresetButton" class="secondary-button compact-button" type="button">Apply preset</button>
+            <button id="savePresetButton" class="secondary-button compact-button" type="button">Save current</button>
+            <button id="deletePresetButton" class="ghost-button compact-button" type="button">Delete custom</button>
+          </div>
+        </div>
         <div class="grid scenario-grid">
           <label>Income tax <button class="info-button" type="button" aria-label="About income tax" data-tooltip="Flat tax on household gross income. Tax revenue funds government purchases, transfers, unemployment benefits and debt service.">i</button> <span class="unit">%</span>
             <input id="scenario_tax_rate" type="number" min="0" max="100" step="0.5" placeholder="unchanged">
@@ -145,6 +157,16 @@
           <p id="resultSubtitle" class="result-subtitle"></p>
         </div>
         <div id="cards" class="cards"></div>
+        <div id="reportActions" class="report-actions hidden">
+          <div>
+            <strong>Download this run</strong>
+            <p>Reports are generated from the same settings. The server re-runs the model to create the file, so no permanent server storage is required.</p>
+          </div>
+          <div class="report-buttons">
+            <button id="downloadExcelButton" class="secondary-button" type="button">Download Excel</button>
+            <button id="downloadCsvButton" class="secondary-button" type="button">Download CSV ZIP</button>
+          </div>
+        </div>
       </section>
 
       <section class="insight-grid">
