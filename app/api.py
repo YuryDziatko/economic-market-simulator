@@ -7,13 +7,16 @@ import numpy as np
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
-from econ_sim import SimulationConfig, compare_scenarios, run_simulation
+from econ_sim import (
+    POLICY_FIELDS, POLICY_LIMITS, STRUCTURAL_FIELDS,
+    PolicyAction, SimulationConfig, compare_scenarios, run_simulation,
+)
 
 from .reports import (
     comparison_csv_zip_bytes, comparison_xlsx_bytes,
     simulation_csv_zip_bytes, simulation_xlsx_bytes,
 )
-from .schemas import CompareRequest, SimulationRequest
+from .schemas import CompareRequest, PolicySimulationRequest, SimulationRequest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,6 +53,56 @@ def get_config() -> dict[str, Any]:
         "defaults": config.to_dict(),
         "source": "data/Simulation_Settings.xlsx",
     }
+
+
+
+
+@router.get("/policy/limits")
+def policy_limits() -> dict[str, Any]:
+    return {
+        "policy_fields": sorted(POLICY_FIELDS),
+        "structural_fields": sorted(STRUCTURAL_FIELDS),
+        "limits": {
+            name: {
+                "minimum": limits.minimum,
+                "maximum": limits.maximum,
+                "max_annual_change": limits.max_annual_change,
+            }
+            for name, limits in POLICY_LIMITS.items()
+        },
+        "action_semantics": "All PolicyAction numeric values are annual deltas, not target levels.",
+    }
+
+
+@router.post("/policy/simulate")
+def policy_simulate_endpoint(request: PolicySimulationRequest) -> dict[str, Any]:
+    try:
+        config = load_baseline_config().with_overrides(**request.overrides)
+        schedule = {
+            int(year): PolicyAction(**action.model_dump())
+            for year, action in request.policy_schedule.items()
+        }
+        result = run_simulation(
+            config,
+            settings_path=SETTINGS_PATH,
+            product_path=PRODUCT_PATH,
+            save=False,
+            policy_schedule=schedule,
+        )
+    except (ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Policy simulation failed") from exc
+
+    payload: dict[str, Any] = {
+        "config": config.to_dict(),
+        "summary": result.summary(),
+        "yearly": _records(result.yearly_summary),
+        "policy_history": _records(result.policy_history),
+    }
+    if request.include_monthly:
+        payload["monthly"] = _records(result.monthly_macro)
+    return payload
 
 
 @router.post("/simulate")

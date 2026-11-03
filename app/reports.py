@@ -17,6 +17,7 @@ CORE_SIMULATION_FRAMES = (
     "monthly_macro",
     "household_income_monthly",
     "government_monthly",
+    "policy_history",
     "company_events",
     "market_events",
     "product_events",

@@ -275,3 +275,14 @@ Capital(t) = Capital(t-1) + Realized Investment(t) - Depreciation(t)
 Capacity responds to capital changes and limits future production. Product innovation splits parent capital/capacity instead of creating productive assets from nothing, and annual firm entry/exit changes capital/capacity with the market.
 
 New dashboard/report metrics include household saving rate, household savings, private investment, productive capital stock, depreciation, investment funding pool, and capacity utilization. See `PHASE4A_SAVINGS_INVESTMENT_CAPITAL.md`.
+
+## Controlled Policy System
+
+The simulator now has a policy layer designed for future AI government agents. `PolicyState` contains the small set of economic-policy variables that may change during a run, while structural/calibration parameters remain fixed. `PolicyAction` expresses bounded annual deltas, and `run_simulation(..., policy_schedule=...)` applies them at the start of the requested year and records a policy history.
+
+Useful endpoints:
+
+- `GET /api/policy/limits`
+- `POST /api/policy/simulate`
+
+See `POLICY_SYSTEM.md` and `examples/policy_schedule.py`.

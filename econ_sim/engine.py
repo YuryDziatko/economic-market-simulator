@@ -13,6 +13,7 @@ from .government import (
     next_government_budgets,
 )
 from .config import SimulationConfig
+from .policy import PolicyAction, PolicyDecision, PolicyState, apply_policy_action, normalize_policy_schedule
 from .investment import (
     allocate_investment_goods_demand,
     desired_investment_budget,
@@ -42,8 +43,13 @@ def simulate(
     investment_demand: pd.DataFrame,
     config: SimulationConfig,
     rng: np.random.Generator,
+    policy_schedule: dict[int, PolicyAction] | None = None,
 ):
     config.validate()
+    policy_schedule = normalize_policy_schedule(policy_schedule, simulation_years=config.simulation_years)
+    policy_state = PolicyState.from_config(config)
+    policy_state.validate()
+    policy_history_rows: list[dict] = []
 
     # Local aliases keep the economic equations readable while SimulationConfig
     # remains the single source of truth for scalar run settings.
@@ -308,6 +314,14 @@ def simulate(
         "Real_Wage_Index": period0_labor["Real_Wage_Index"],
         "Labor_Wage_Demand_Factor": period0_labor["Labor_Wage_Demand_Factor"],
         "Labor_Constraint_Production_Factor": 1.0,
+        "Policy_Income_Tax_Rate": policy_state.tax_rate,
+        "Policy_Corporate_Tax_Rate": policy_state.corporate_profit_tax_rate,
+        "Policy_Interest_Rate": policy_state.interest_rate,
+        "Policy_Government_Purchase_Share": policy_state.government_consumption_share,
+        "Policy_General_Transfer_Share": policy_state.general_transfer_share,
+        "Policy_Government_Reserve_Share": policy_state.government_reserve_share,
+        "Policy_Unemployment_Benefit_Rate": policy_state.unemployment_transfer_rate,
+        "Policy_Profit_Retention_Rate": policy_state.profit_retention_rate,
     })
 
     government_rows.append({
@@ -335,6 +349,32 @@ def simulate(
     for t in range(1, months + 1):
         year = (t - 1) // 12 + 1
         month_in_year = (t - 1) % 12 + 1
+
+        # Policy decisions occur at the start of a simulated year.  This is the
+        # controlled interface that deterministic rules and future AI agents use.
+        # Structural settings are intentionally not exposed here.
+        if month_in_year == 1 and year in policy_schedule:
+            action = policy_schedule[year]
+            before_policy = policy_state
+            policy_state = apply_policy_action(policy_state, action)
+            decision = PolicyDecision(year, before_policy, action, policy_state)
+            policy_history_rows.append(decision.to_record())
+
+            tax_rate = policy_state.tax_rate
+            corporate_profit_tax_rate = policy_state.corporate_profit_tax_rate
+            interest_rate = policy_state.interest_rate
+            government_consumption_share = policy_state.government_consumption_share
+            general_transfer_share = policy_state.general_transfer_share
+            government_reserve_share = policy_state.government_reserve_share
+            unemployment_transfer_rate = policy_state.unemployment_transfer_rate
+            profit_retention_rate = policy_state.profit_retention_rate
+
+            # Fiscal shares apply immediately to the most recently observed tax
+            # revenue instead of waiting for an extra annual cycle.
+            if government_rows:
+                latest_tax_revenue = float(government_rows[-1].get("Government_Revenue", 0.0))
+                current_government_purchase_budget = latest_tax_revenue * government_consumption_share
+                current_general_transfer_budget = latest_tax_revenue * general_transfer_share
 
         # Annual demographic update and intelligent firm entry/exit at the start
         # of each year after Year 1. Total entry is still tied to real GDP growth;
@@ -801,6 +841,14 @@ def simulate(
             "Real_Wage_Index": labor_macro["Real_Wage_Index"],
             "Labor_Wage_Demand_Factor": labor_macro["Labor_Wage_Demand_Factor"],
             "Labor_Constraint_Production_Factor": labor_macro["Labor_Constraint_Production_Factor"],
+            "Policy_Income_Tax_Rate": policy_state.tax_rate,
+            "Policy_Corporate_Tax_Rate": policy_state.corporate_profit_tax_rate,
+            "Policy_Interest_Rate": policy_state.interest_rate,
+            "Policy_Government_Purchase_Share": policy_state.government_consumption_share,
+            "Policy_General_Transfer_Share": policy_state.general_transfer_share,
+            "Policy_Government_Reserve_Share": policy_state.government_reserve_share,
+            "Policy_Unemployment_Benefit_Rate": policy_state.unemployment_transfer_rate,
+            "Policy_Profit_Retention_Rate": policy_state.profit_retention_rate,
         })
 
         meta_product = product_meta["Product"].to_numpy(object)
@@ -935,6 +983,7 @@ def simulate(
     product_events_df = pd.DataFrame(product_event_rows)
     household_income_monthly = pd.DataFrame(household_income_rows)
     government_monthly = pd.DataFrame(government_rows)
+    policy_history = pd.DataFrame(policy_history_rows)
 
     products_final = product_meta.copy()
     products_final["Current_Price"] = current_prices
@@ -1028,6 +1077,13 @@ def simulate(
             "Income_Gini_End_Class_Average": float(end["Income_Gini_Class_Average"]),
             "Labor_Productivity_Index_End": float(end["Labor_Productivity_Index"]),
             "Labor_Constraint_Months": int((y["Labor_Constraint_Production_Factor"] < 0.999999).sum()),
+            "Income_Tax_Rate_End": float(end["Policy_Income_Tax_Rate"]),
+            "Corporate_Tax_Rate_End": float(end["Policy_Corporate_Tax_Rate"]),
+            "Interest_Rate_End": float(end["Policy_Interest_Rate"]),
+            "Government_Purchase_Share_End": float(end["Policy_Government_Purchase_Share"]),
+            "General_Transfer_Share_End": float(end["Policy_General_Transfer_Share"]),
+            "Unemployment_Benefit_Rate_End": float(end["Policy_Unemployment_Benefit_Rate"]),
+            "Profit_Retention_Rate_End": float(end["Policy_Profit_Retention_Rate"]),
         })
 
     return (
@@ -1041,4 +1097,5 @@ def simulate(
         product_events_df,
         household_income_monthly,
         government_monthly,
+        policy_history,
     )

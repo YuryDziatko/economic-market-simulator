@@ -9,6 +9,7 @@ import pandas as pd
 
 from .companies import generate_companies, prepare_products
 from .config import SimulationConfig
+from .policy import PolicyAction, normalize_policy_schedule
 from .engine import simulate
 from .households import generate_households
 from .io import load_products, load_settings, save_outputs
@@ -38,6 +39,7 @@ class SimulationResult:
     product_events: pd.DataFrame
     household_income_monthly: pd.DataFrame
     government_monthly: pd.DataFrame
+    policy_history: pd.DataFrame
     output_workbook: Path | None = None
 
     @property
@@ -86,6 +88,7 @@ class SimulationResult:
             "product_monthly": self.product_monthly,
             "household_income_monthly": self.household_income_monthly,
             "government_monthly": self.government_monthly,
+            "policy_history": self.policy_history,
         }
 
 
@@ -96,6 +99,7 @@ def run_simulation(
     product_path: str | Path | None = None,
     output_dir: str | Path | None = None,
     save: bool = False,
+    policy_schedule: dict[int, PolicyAction] | None = None,
 ) -> SimulationResult:
     """Run the complete economy from a typed config.
 
@@ -104,6 +108,7 @@ def run_simulation(
     scalar settings come exclusively from ``config``.
     """
     config.validate()
+    policy_schedule = normalize_policy_schedule(policy_schedule, simulation_years=config.simulation_years)
 
     settings_path = Path(settings_path or (DEFAULT_DATA_DIR / "Simulation_Settings.xlsx"))
     product_path = Path(product_path or (DEFAULT_DATA_DIR / "Product_List.xlsx"))
@@ -148,6 +153,7 @@ def run_simulation(
         product_events,
         household_income_monthly,
         government_monthly,
+        policy_history,
     ) = simulate(
         products=products,
         households=households,
@@ -162,6 +168,7 @@ def run_simulation(
         investment_demand=tables["investment_demand"],
         config=config,
         rng=rng,
+        policy_schedule=policy_schedule,
     )
 
     result = SimulationResult(
@@ -181,6 +188,7 @@ def run_simulation(
         product_events=product_events,
         household_income_monthly=household_income_monthly,
         government_monthly=government_monthly,
+        policy_history=policy_history,
     )
 
     if save:
