@@ -98,6 +98,29 @@ def load_settings(path: Path, *, validate_general: bool = True) -> dict:
     if (government_demand["Government Weight"] < 0).any():
         raise ValueError("Government demand weights cannot be negative")
 
+    savings_settings = pd.read_excel(path, sheet_name="Savings_Settings", header=3)
+    savings_settings = savings_settings[pd.to_numeric(savings_settings["Order"], errors="coerce").notna()].copy()
+    savings_settings["Order"] = savings_settings["Order"].astype(int)
+    savings_settings["Class"] = savings_settings["Class"].astype(str)
+    savings_settings = savings_settings.sort_values("Order")
+    if savings_settings["Class"].tolist() != class_names:
+        raise ValueError("Savings_Settings classes/order must match Household_Classes")
+    for col in ["Base Savings Rate", "Minimum Rate", "Maximum Rate"]:
+        savings_settings[col] = pd.to_numeric(savings_settings[col], errors="raise")
+    if ((savings_settings[["Base Savings Rate", "Minimum Rate", "Maximum Rate"]]) < 0).any().any():
+        raise ValueError("Savings rates cannot be negative")
+    if (savings_settings["Maximum Rate"] > 1).any():
+        raise ValueError("Savings maximum rates cannot exceed 100%")
+    if (savings_settings["Minimum Rate"] > savings_settings["Maximum Rate"]).any():
+        raise ValueError("Savings minimum rate cannot exceed maximum rate")
+
+    investment_demand = pd.read_excel(path, sheet_name="Investment_Demand", header=3)
+    investment_demand = investment_demand.dropna(subset=["Division"]).copy()
+    investment_demand["Division"] = investment_demand["Division"].astype(str).str.replace(r"\.0$", "", regex=True).str.zfill(2)
+    investment_demand["Investment Weight"] = pd.to_numeric(investment_demand["Investment Weight"], errors="raise")
+    if (investment_demand["Investment Weight"] < 0).any():
+        raise ValueError("Investment demand weights cannot be negative")
+
     return {
         "general": general,
         "classes": classes,
@@ -109,6 +132,8 @@ def load_settings(path: Path, *, validate_general: bool = True) -> dict:
         "employment": employment,
         "government_transfers": government_transfers,
         "government_demand": government_demand,
+        "savings_settings": savings_settings,
+        "investment_demand": investment_demand,
     }
 
 
@@ -142,7 +167,7 @@ def save_outputs(output_dir: Path, **frames):
         df.to_csv(output_dir / f"{name}.csv", index=False)
 
     # This workbook is convenience output when the project is run locally in PyCharm.
-    excel_path = output_dir / "Simulation_Output_Phase3.xlsx"
+    excel_path = output_dir / "Simulation_Output_Phase4A.xlsx"
     with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
         preferred = [
             "yearly_summary", "monthly_macro", "households", "companies",

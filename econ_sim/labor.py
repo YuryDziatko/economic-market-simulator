@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 from .utils import gini
+from .investment import savings_rates_by_class
 
 
 def exact_class_counts(total_households: int, classes: pd.DataFrame) -> np.ndarray:
@@ -85,6 +86,11 @@ def labor_and_income_state(
     unemployment_transfer_rate: float,
     corporate_profit_tax_rate: float = 0.0,
     general_transfers_by_class: np.ndarray | None = None,
+    savings_settings: pd.DataFrame | None = None,
+    interest_rate: float = 0.0,
+    neutral_interest_rate: float = 0.03,
+    savings_rate_sensitivity: float = 0.0,
+    profit_retention_rate: float = 0.0,
 ) -> tuple[dict, pd.DataFrame, float]:
     """
     Compute labor demand, employment, class income and a production labor-capacity factor.
@@ -163,7 +169,9 @@ def labor_and_income_state(
     # corporate tax is taken from this pool before household capital income is distributed.
     gross_capital_income_total = max(float(nominal_output) - labor_income_total, 0.0)
     corporate_tax_proxy = gross_capital_income_total * float(np.clip(corporate_profit_tax_rate, 0.0, 1.0))
-    capital_income_total = max(gross_capital_income_total - corporate_tax_proxy, 0.0)
+    post_tax_business_income = max(gross_capital_income_total - corporate_tax_proxy, 0.0)
+    retained_business_income = post_tax_business_income * float(np.clip(profit_retention_rate, 0.0, 1.0))
+    capital_income_total = max(post_tax_business_income - retained_business_income, 0.0)
     capital_weight = counts * labor_calibration["capital_weights"]
     if capital_weight.sum() > 0:
         capital_income_class = capital_income_total * capital_weight / capital_weight.sum()
@@ -184,8 +192,19 @@ def labor_and_income_state(
     taxes_class = taxable_income_class * float(tax_rate)
     gross_income_class = taxable_income_class + transfers_class
     disposable_class = taxable_income_class - taxes_class + transfers_class
-    savings_class = np.zeros_like(disposable_class)
-    consumption_class = disposable_class - savings_class
+
+    if savings_settings is None:
+        savings_rates = np.zeros_like(disposable_class, dtype=float)
+    else:
+        savings_rates = savings_rates_by_class(
+            savings_settings,
+            class_order,
+            interest_rate=interest_rate,
+            neutral_interest_rate=neutral_interest_rate,
+            sensitivity=savings_rate_sensitivity,
+        )
+    savings_class = np.maximum(disposable_class, 0.0) * savings_rates
+    consumption_class = np.maximum(disposable_class - savings_class, 0.0)
 
     avg_income = np.divide(
         gross_income_class,
@@ -234,6 +253,7 @@ def labor_and_income_state(
             "Gross_Income": float(gross_income_class[i]),
             "Taxes": float(taxes_class[i]),
             "Disposable_Income": float(disposable_class[i]),
+            "Savings_Rate": float(savings_rates[i]),
             "Savings": float(savings_class[i]),
             "Consumption_Budget": float(consumption_class[i]),
             "Average_Gross_Income_Per_Household": float(avg_income[i]),
@@ -257,6 +277,7 @@ def labor_and_income_state(
         "Labor_Income": labor_income_total,
         "Gross_Capital_Income": gross_capital_income_total,
         "Corporate_Tax_Proxy": corporate_tax_proxy,
+        "Retained_Business_Income": retained_business_income,
         "Capital_Income": capital_income_total,
         "Unemployment_Transfers": float(unemployment_transfers_class.sum()),
         "General_Transfers": float(general_transfers_class.sum()),
@@ -264,6 +285,7 @@ def labor_and_income_state(
         "Household_Gross_Income": float(gross_income_class.sum()),
         "Household_Taxes": float(taxes_class.sum()),
         "Household_Disposable_Income": float(disposable_class.sum()),
+        "Household_Savings": float(savings_class.sum()),
         "Household_Consumption_Budget": float(consumption_class.sum()),
         "Income_Gini_Class_Average": income_gini,
         "Labor_Productivity_Index": productivity_index,

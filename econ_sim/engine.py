@@ -13,6 +13,13 @@ from .government import (
     next_government_budgets,
 )
 from .config import SimulationConfig
+from .investment import (
+    allocate_investment_goods_demand,
+    desired_investment_budget,
+    initialize_capital_state,
+    investment_market_scores,
+    update_capital_and_capacity,
+)
 from .firm_dynamics import (
     allocate_market_changes,
     classify_market,
@@ -31,6 +38,8 @@ def simulate(
     employment_settings: pd.DataFrame,
     government_transfers: pd.DataFrame,
     government_demand: pd.DataFrame,
+    savings_settings: pd.DataFrame,
+    investment_demand: pd.DataFrame,
     config: SimulationConfig,
     rng: np.random.Generator,
 ):
@@ -88,6 +97,17 @@ def simulate(
     initial_public_debt = config.initial_public_debt
     debt_interest_rate = config.debt_interest_rate
     max_government_demand_growth = config.max_government_demand_growth
+    interest_rate = config.interest_rate
+    neutral_interest_rate = config.neutral_interest_rate
+    savings_rate_sensitivity = config.savings_rate_sensitivity
+    annual_depreciation_rate = config.annual_depreciation_rate
+    capital_output_ratio = config.capital_output_ratio
+    initial_capacity_utilization = config.initial_capacity_utilization
+    profit_retention_rate = config.profit_retention_rate
+    investment_interest_sensitivity = config.investment_interest_sensitivity
+    capital_efficiency = config.capital_efficiency
+    max_monthly_capacity_growth = config.max_monthly_capacity_growth
+    max_investment_share_of_funds = config.max_investment_share_of_funds
 
     months = int(years) * 12
     if months <= 0:
@@ -119,6 +139,14 @@ def simulate(
     cpi_ref_prices = base_prices.copy()
     current_production = base_output.copy()
     inventory = base_output * float(initial_inventory_months)
+    capital_stock, current_capacity = initialize_capital_state(
+        base_prices,
+        base_output,
+        capital_output_ratio=capital_output_ratio,
+        initial_capacity_utilization=initial_capacity_utilization,
+    )
+    prior_imbalance = np.zeros(len(base_output), dtype=float)
+    prior_margin = np.zeros(len(base_output), dtype=float)
 
     # Firm counts are now endogenous. Market structure is reclassified from the
     # active number of producers after every annual entry/exit event.
@@ -172,8 +200,17 @@ def simulate(
         tax_rate=tax_rate,
         unemployment_transfer_rate=unemployment_transfer_rate,
         corporate_profit_tax_rate=corporate_profit_tax_rate,
+        savings_settings=savings_settings,
+        interest_rate=interest_rate,
+        neutral_interest_rate=neutral_interest_rate,
+        savings_rate_sensitivity=savings_rate_sensitivity,
+        profit_retention_rate=profit_retention_rate,
         general_transfers_by_class=np.zeros(len(class_order), dtype=float),
     )
+
+    accumulated_savings_by_class = np.zeros(len(class_order), dtype=float)
+    period0_class_income["Accumulated_Savings"] = 0.0
+    investment_funding_pool = 0.0
 
     fixed_cost_p0_total = float(companies["Fixed_Cost_P0"].sum())
     avg_fixed_cost_p0_per_company = fixed_cost_p0_total / max(initial_companies, 1)
@@ -221,6 +258,18 @@ def simulate(
         "Inflation_MoM": 0.0,
         "Inflation_12M": 0.0,
         "Planned_Consumption": float(period0_labor["Household_Consumption_Budget"]),
+        "Household_Savings": float(period0_labor["Household_Savings"]),
+        "Household_Savings_Rate": float(period0_labor["Household_Savings"] / max(period0_labor["Household_Disposable_Income"], 1e-9)),
+        "Accumulated_Household_Savings": 0.0,
+        "Retained_Business_Income": float(period0_labor["Retained_Business_Income"]),
+        "Investment_Funding_Pool_End": investment_funding_pool,
+        "Desired_Investment": 0.0,
+        "Planned_Investment": 0.0,
+        "Realized_Investment": 0.0,
+        "Unmet_Investment_Demand_Value": 0.0,
+        "Capital_Stock_End": float(capital_stock.sum()),
+        "Capital_Depreciation": 0.0,
+        "Capacity_Utilization": float(np.sum(current_production) / max(np.sum(current_capacity), 1e-9)),
         "Realized_Consumption_Sales": base_gdp_monthly,
         "Unmet_Demand_Value": 0.0,
         "Inventory_Value": float(np.sum(inventory * base_prices)),
@@ -350,6 +399,8 @@ def simulate(
                         1.0 - exit_capacity_share * (abs(delta) / old_firms),
                     )
                 current_production[i] *= capacity_factor
+                current_capacity[i] *= capacity_factor
+                capital_stock[i] *= capacity_factor
                 firm_counts[i] = max(1, firm_counts[i] + delta)
 
                 new_structure = str(classify_market(np.array([firm_counts[i]]))[0])
@@ -427,6 +478,28 @@ def simulate(
         new_products_this_month = len(innovation_events)
         product_ids = product_meta["Product_ID"].astype(str).to_numpy()
 
+        if not innovation_events.empty:
+            child_capital: list[float] = []
+            child_capacity: list[float] = []
+            child_prior_imbalance: list[float] = []
+            child_prior_margin: list[float] = []
+            for event in innovation_events.to_dict("records"):
+                parent_id = str(event["Parent_Product_ID"])
+                parent_idx = int(np.flatnonzero(product_ids == parent_id)[0])
+                share = float(event["Output_Share_Transferred"])
+                transferred_capital = float(capital_stock[parent_idx] * share)
+                transferred_capacity = float(current_capacity[parent_idx] * share)
+                capital_stock[parent_idx] *= (1.0 - share)
+                current_capacity[parent_idx] *= (1.0 - share)
+                child_capital.append(transferred_capital)
+                child_capacity.append(transferred_capacity)
+                child_prior_imbalance.append(float(prior_imbalance[parent_idx]))
+                child_prior_margin.append(float(prior_margin[parent_idx]))
+            capital_stock = np.concatenate([capital_stock, np.asarray(child_capital, dtype=float)])
+            current_capacity = np.concatenate([current_capacity, np.asarray(child_capacity, dtype=float)])
+            prior_imbalance = np.concatenate([prior_imbalance, np.asarray(child_prior_imbalance, dtype=float)])
+            prior_margin = np.concatenate([prior_margin, np.asarray(child_prior_margin, dtype=float)])
+
         household_factor = current_households / initial_households
         general_transfers_by_class = distribute_general_transfers(
             current_general_transfer_budget, current_households, classes, government_transfers
@@ -457,6 +530,11 @@ def simulate(
             tax_rate=tax_rate,
             unemployment_transfer_rate=unemployment_transfer_rate,
             corporate_profit_tax_rate=corporate_profit_tax_rate,
+            savings_settings=savings_settings,
+            interest_rate=interest_rate,
+            neutral_interest_rate=neutral_interest_rate,
+            savings_rate_sensitivity=savings_rate_sensitivity,
+            profit_retention_rate=profit_retention_rate,
             general_transfers_by_class=general_transfers_by_class,
         )
         desired_employment_signal = labor_probe["Desired_Employment_Pre_Constraint"]
@@ -484,11 +562,45 @@ def simulate(
             tax_rate=tax_rate,
             unemployment_transfer_rate=unemployment_transfer_rate,
             corporate_profit_tax_rate=corporate_profit_tax_rate,
+            savings_settings=savings_settings,
+            interest_rate=interest_rate,
+            neutral_interest_rate=neutral_interest_rate,
+            savings_rate_sensitivity=savings_rate_sensitivity,
+            profit_retention_rate=profit_retention_rate,
             general_transfers_by_class=general_transfers_by_class,
         )
         labor_macro["Desired_Employment_Pre_Constraint"] = desired_employment_signal
         labor_macro["Labor_Constraint_Production_Factor"] = labor_factor
+
+        monthly_class_savings = (
+            class_income_df.set_index("Class")["Savings"]
+            .reindex(class_order).fillna(0.0).to_numpy(float)
+        )
+        accumulated_savings_by_class += monthly_class_savings
+        accumulated_map = dict(zip(class_order, accumulated_savings_by_class))
+        class_income_df["Accumulated_Savings"] = class_income_df["Class"].map(accumulated_map).astype(float)
         household_income_rows.extend(class_income_df.to_dict("records"))
+
+        # Savings and retained business income become financial resources available
+        # for productive investment. The pool can carry unused funds forward.
+        new_investment_funds = float(labor_macro["Household_Savings"] + labor_macro["Retained_Business_Income"])
+        investment_funding_pool += new_investment_funds
+        recipient_scores, capacity_utilization_by_product = investment_market_scores(
+            current_production, current_capacity, prior_imbalance, prior_margin
+        )
+        desired_investment = desired_investment_budget(
+            capital_stock,
+            recipient_scores,
+            annual_depreciation_rate=annual_depreciation_rate,
+            interest_rate=interest_rate,
+            neutral_interest_rate=neutral_interest_rate,
+            interest_sensitivity=investment_interest_sensitivity,
+        )
+        planned_investment_budget = min(
+            desired_investment,
+            max(investment_funding_pool, 0.0) * max_investment_share_of_funds,
+        )
+
         class_budgets = (
             class_income_df.set_index("Class")["Consumption_Budget"]
             .reindex(class_order).fillna(0.0).to_numpy(float)
@@ -510,7 +622,14 @@ def simulate(
             current_production=current_production,
             government_demand=government_demand,
         )
-        demand = household_demand + government_demand_qty
+        investment_demand_qty, investment_planned_spending = allocate_investment_goods_demand(
+            planned_investment_budget,
+            product_meta,
+            current_prices,
+            current_production,
+            investment_demand,
+        )
+        demand = household_demand + government_demand_qty + investment_demand_qty
 
         inventory_start = inventory.copy()
         available = current_production + inventory_start
@@ -528,10 +647,15 @@ def simulate(
         government_demand_share = np.divide(
             government_demand_qty, np.maximum(demand, 1e-9), out=np.zeros_like(demand), where=demand > 0
         )
+        investment_demand_share = np.divide(
+            investment_demand_qty, np.maximum(demand, 1e-9), out=np.zeros_like(demand), where=demand > 0
+        )
         household_sales_value = sales_value * household_demand_share
         government_sales_value = sales_value * government_demand_share
+        investment_sales_value = sales_value * investment_demand_share
         household_unmet_qty = unmet_qty * household_demand_share
         government_unmet_qty = unmet_qty * government_demand_share
+        investment_unmet_qty = unmet_qty * investment_demand_share
         production_value = current_production * current_prices
         nominal_gdp = float(np.sum(production_value))
         real_gdp = float(np.sum(current_production * real_base_prices))
@@ -585,10 +709,27 @@ def simulate(
         planned_total = float(planned_spending.sum())
         realized_consumption = float(household_sales_value.sum())
         planned_government_purchases = float(government_planned_spending.sum())
+        realized_investment = float(investment_sales_value.sum())
+        planned_investment = float(investment_planned_spending.sum())
+        investment_funding_pool = max(investment_funding_pool - realized_investment, 0.0)
         unmet_household_value = float(np.sum(household_unmet_qty * current_prices))
         unmet_government_value = float(np.sum(government_unmet_qty * current_prices))
-        unmet_value = unmet_household_value + unmet_government_value
+        unmet_investment_value = float(np.sum(investment_unmet_qty * current_prices))
+        unmet_value = unmet_household_value + unmet_government_value + unmet_investment_value
         inventory_value = float(np.sum(inventory_end * current_prices))
+
+        capital_stock, next_capacity, capital_depreciation, investment_by_recipient = update_capital_and_capacity(
+            capital_stock,
+            current_capacity,
+            realized_investment,
+            recipient_scores,
+            annual_depreciation_rate=annual_depreciation_rate,
+            capital_efficiency=capital_efficiency,
+            max_monthly_capacity_growth=max_monthly_capacity_growth,
+        )
+        aggregate_capacity_utilization = float(
+            np.sum(current_production) / max(np.sum(current_capacity), 1e-9)
+        )
 
         monthly_rows.append({
             "Period_Month": t,
@@ -605,11 +746,24 @@ def simulate(
             "Inflation_MoM": inflation_mom,
             "Inflation_12M": inflation_12m,
             "Planned_Consumption": planned_total,
+            "Household_Savings": float(labor_macro["Household_Savings"]),
+            "Household_Savings_Rate": float(labor_macro["Household_Savings"] / max(labor_macro["Household_Disposable_Income"], 1e-9)),
+            "Accumulated_Household_Savings": float(accumulated_savings_by_class.sum()),
+            "Retained_Business_Income": float(labor_macro["Retained_Business_Income"]),
+            "New_Investment_Funds": new_investment_funds,
+            "Investment_Funding_Pool_End": float(investment_funding_pool),
+            "Desired_Investment": float(desired_investment),
+            "Planned_Investment": planned_investment,
+            "Realized_Investment": realized_investment,
+            "Capital_Stock_End": float(capital_stock.sum()),
+            "Capital_Depreciation": float(capital_depreciation),
+            "Capacity_Utilization": aggregate_capacity_utilization,
             "Realized_Consumption_Sales": realized_consumption,
             "Planned_Government_Purchases": planned_government_purchases,
             "Government_Purchases": realized_government_purchases,
             "Unmet_Household_Demand_Value": unmet_household_value,
             "Unmet_Government_Demand_Value": unmet_government_value,
+            "Unmet_Investment_Demand_Value": unmet_investment_value,
             "Unmet_Demand_Value": unmet_value,
             "Inventory_Value": inventory_value,
             "Shortage_Product_Share": float(np.mean(unmet_qty > np.maximum(0.01 * demand, 1e-9))),
@@ -671,8 +825,13 @@ def simulate(
                 "Price": current_prices[i],
                 "Household_Demand": household_demand[i],
                 "Government_Demand": government_demand_qty[i],
+                "Investment_Demand": investment_demand_qty[i],
                 "Demand": demand[i],
                 "Production": current_production[i],
+                "Capacity": current_capacity[i],
+                "Capacity_Utilization": capacity_utilization_by_product[i],
+                "Capital_Stock_End": capital_stock[i],
+                "Investment_Allocated": investment_by_recipient[i],
                 "Inventory_Start": inventory_start[i],
                 "Available_Supply": available[i],
                 "Sales": sales[i],
@@ -740,10 +899,14 @@ def simulate(
             max_monthly_production_change,
         )
         next_production = np.maximum(0.0, current_production * (1.0 + prod_change))
+        next_production = np.minimum(next_production, next_capacity)
 
         inventory = inventory_end
         current_prices = next_prices
         current_production = next_production
+        current_capacity = next_capacity
+        prior_imbalance = imbalance.copy()
+        prior_margin = product_margin_proxy.copy()
         current_average_wage = next_wage
         current_government_purchase_budget = next_purchase_budget
         current_general_transfer_budget = next_transfer_budget
@@ -778,6 +941,12 @@ def simulate(
     products_final["Demand_Reference_Price"] = demand_ref_prices
     products_final["Real_Base_Price"] = real_base_prices
     products_final["Current_Production"] = current_production
+    products_final["Current_Capacity"] = current_capacity
+    products_final["Capital_Stock_End"] = capital_stock
+    products_final["Capacity_Utilization_End"] = np.divide(
+        current_production, np.maximum(current_capacity, 1e-9),
+        out=np.zeros_like(current_production), where=current_capacity > 0
+    )
     products_final["Inventory_End"] = inventory
     products_final["Elasticity_Abs"] = elasticities
     products_final["Number_of_Firms"] = firm_counts
@@ -817,6 +986,18 @@ def simulate(
             "Company_Count_End": int(end["Company_Count"]),
             "Planned_Consumption": float(y["Planned_Consumption"].sum()),
             "Realized_Consumption_Sales": float(y["Realized_Consumption_Sales"].sum()),
+            "Household_Savings": float(y["Household_Savings"].sum()),
+            "Household_Savings_Rate_End": float(end["Household_Savings_Rate"]),
+            "Accumulated_Household_Savings_End": float(end["Accumulated_Household_Savings"]),
+            "Retained_Business_Income": float(y["Retained_Business_Income"].sum()),
+            "Desired_Investment": float(y["Desired_Investment"].sum()),
+            "Planned_Investment": float(y["Planned_Investment"].sum()),
+            "Realized_Investment": float(y["Realized_Investment"].sum()),
+            "Investment_Funding_Pool_End": float(end["Investment_Funding_Pool_End"]),
+            "Capital_Stock_End": float(end["Capital_Stock_End"]),
+            "Capital_Depreciation": float(y["Capital_Depreciation"].sum()),
+            "Capacity_Utilization_End": float(end["Capacity_Utilization"]),
+            "Unmet_Investment_Demand_Value": float(y["Unmet_Investment_Demand_Value"].sum()),
             "Unmet_Demand_Value": float(y["Unmet_Demand_Value"].sum()),
             "Average_Shortage_Product_Share": float(y["Shortage_Product_Share"].mean()),
             "Producer_Profit": float(y["Producer_Profit"].sum()),

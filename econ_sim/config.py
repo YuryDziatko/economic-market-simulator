@@ -83,6 +83,18 @@ class SimulationConfig:
     debt_interest_rate: float = 0.03
     max_government_demand_growth: float = 0.10
 
+    # Phase 4A: household saving, investment and productive capital
+    neutral_interest_rate: float = 0.03
+    savings_rate_sensitivity: float = 0.50
+    annual_depreciation_rate: float = 0.05
+    capital_output_ratio: float = 2.50
+    initial_capacity_utilization: float = 0.85
+    profit_retention_rate: float = 0.40
+    investment_interest_sensitivity: float = 2.00
+    capital_efficiency: float = 0.50
+    max_monthly_capacity_growth: float = 0.03
+    max_investment_share_of_funds: float = 0.90
+
     @classmethod
     def from_mapping(cls, values: dict[str, Any]) -> "SimulationConfig":
         """Create a config from a dict such as General_Settings key/value pairs."""
@@ -137,6 +149,14 @@ class SimulationConfig:
             raise ValueError("innovation_price_min_multiplier must be positive")
         if self.innovation_price_max_multiplier < self.innovation_price_min_multiplier:
             raise ValueError("innovation launch price max must be >= min")
+        if self.capital_output_ratio <= 0:
+            raise ValueError("capital_output_ratio must be positive")
+        if self.capital_efficiency < 0:
+            raise ValueError("capital_efficiency cannot be negative")
+        if self.savings_rate_sensitivity < 0:
+            raise ValueError("savings_rate_sensitivity cannot be negative")
+        if self.investment_interest_sensitivity < 0:
+            raise ValueError("investment_interest_sensitivity cannot be negative")
 
         probability_fields = {
             "tax_rate": self.tax_rate,
@@ -148,6 +168,11 @@ class SimulationConfig:
             "labor_income_share_p0": self.labor_income_share_p0,
             "unemployment_transfer_rate": self.unemployment_transfer_rate,
             "corporate_profit_tax_rate": self.corporate_profit_tax_rate,
+            "annual_depreciation_rate": self.annual_depreciation_rate,
+            "initial_capacity_utilization": self.initial_capacity_utilization,
+            "profit_retention_rate": self.profit_retention_rate,
+            "max_monthly_capacity_growth": self.max_monthly_capacity_growth,
+            "max_investment_share_of_funds": self.max_investment_share_of_funds,
         }
         for name, value in probability_fields.items():
             if not 0 <= value <= 1:

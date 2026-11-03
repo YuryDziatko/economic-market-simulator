@@ -61,6 +61,9 @@
           <label>Corporate tax <button class="info-button" type="button" aria-label="About corporate tax" data-tooltip="Tax proxy on positive business/capital income. Losses do not create negative tax revenue.">i</button> <span class="unit">%</span>
             <input id="corporate_profit_tax_rate" type="number" min="0" max="100" step="0.5">
           </label>
+          <label>Policy interest rate <button class="info-button" type="button" aria-label="About interest rate" data-tooltip="Annual policy/market interest rate used by Phase 4A. Rates above the neutral rate encourage household saving and reduce desired business expansion investment.">i</button> <span class="unit">%</span>
+            <input id="interest_rate" type="number" min="-10" max="100" step="0.1">
+          </label>
           <label>Inflation target <button class="info-button" type="button" aria-label="About inflation target" data-tooltip="Background annual price pressure. Actual inflation can differ because shortages, surpluses and demand conditions also move prices.">i</button> <span class="unit">%</span>
             <input id="annual_inflation" type="number" min="-20" max="100" step="0.1">
           </label>
@@ -90,6 +93,33 @@
           </label>
           <label>Debt interest rate <button class="info-button" type="button" aria-label="About debt interest" data-tooltip="Annual interest charged on outstanding public debt. Higher rates increase government expenses when debt exists.">i</button> <span class="unit">%</span>
             <input id="debt_interest_rate" type="number" min="0" max="100" step="0.1">
+          </label>
+          <label>Neutral interest rate <button class="info-button" type="button" aria-label="About neutral interest rate" data-tooltip="Reference rate for saving and investment behavior. The gap between the policy rate and this value changes saving and investment incentives.">i</button> <span class="unit">%</span>
+            <input id="neutral_interest_rate" type="number" min="-10" max="100" step="0.1">
+          </label>
+          <label>Capital depreciation <button class="info-button" type="button" aria-label="About depreciation" data-tooltip="Annual rate at which productive capital wears out or becomes obsolete.">i</button> <span class="unit">%</span>
+            <input id="annual_depreciation_rate" type="number" min="0" max="100" step="0.1">
+          </label>
+          <label>Initial capital/output ratio <button class="info-button" type="button" aria-label="About capital output ratio" data-tooltip="Initial productive capital stock as a multiple of annualized period-0 output value.">i</button>
+            <input id="capital_output_ratio" type="number" min="0.1" max="20" step="0.1">
+          </label>
+          <label>Initial capacity utilization <button class="info-button" type="button" aria-label="About capacity utilization" data-tooltip="Starting production as a share of maximum productive capacity.">i</button> <span class="unit">%</span>
+            <input id="initial_capacity_utilization" type="number" min="1" max="100" step="1">
+          </label>
+          <label>Profit retention <button class="info-button" type="button" aria-label="About retained business income" data-tooltip="Share of post-tax business/capital income retained inside firms rather than paid to households. Retained income helps fund investment.">i</button> <span class="unit">%</span>
+            <input id="profit_retention_rate" type="number" min="0" max="100" step="1">
+          </label>
+          <label>Investment rate sensitivity <button class="info-button" type="button" aria-label="About investment sensitivity" data-tooltip="Controls how strongly desired expansion investment responds to the gap between the policy and neutral interest rate.">i</button>
+            <input id="investment_interest_sensitivity" type="number" min="0" max="20" step="0.1">
+          </label>
+          <label>Capital efficiency <button class="info-button" type="button" aria-label="About capital efficiency" data-tooltip="Elasticity translating changes in productive capital into changes in physical production capacity.">i</button>
+            <input id="capital_efficiency" type="number" min="0" max="5" step="0.05">
+          </label>
+          <label>Max monthly capacity growth <button class="info-button" type="button" aria-label="About capacity growth cap" data-tooltip="Maximum monthly increase or decrease in productive capacity caused by capital changes.">i</button> <span class="unit">%</span>
+            <input id="max_monthly_capacity_growth" type="number" min="0" max="100" step="0.1">
+          </label>
+          <label>Max investable funding <button class="info-button" type="button" aria-label="About investable funding" data-tooltip="Maximum share of accumulated savings and retained income that can be committed to investment in one month.">i</button> <span class="unit">%</span>
+            <input id="max_investment_share_of_funds" type="number" min="0" max="100" step="1">
           </label>
         </div>
       </details>
@@ -134,6 +164,12 @@
           </label>
           <label>New-product chance <span class="unit">%</span>
             <input id="scenario_product_innovation_chance" type="number" min="0" max="100" step="0.1" placeholder="unchanged">
+          </label>
+          <label>Policy interest rate <span class="unit">%</span>
+            <input id="scenario_interest_rate" type="number" min="-10" max="100" step="0.1" placeholder="unchanged">
+          </label>
+          <label>Profit retention <span class="unit">%</span>
+            <input id="scenario_profit_retention_rate" type="number" min="0" max="100" step="1" placeholder="unchanged">
           </label>
         </div>
       </div>
@@ -209,6 +245,22 @@
         <article class="chart-card">
           <div class="chart-heading"><h3>Public debt / GDP</h3><p>Public debt relative to nominal GDP.</p></div>
           <div class="chart-wrap"><canvas id="debtChart"></canvas></div>
+        </article>
+        <article class="chart-card">
+          <div class="chart-heading"><h3>Household savings rate</h3><p>Share of disposable household income saved rather than consumed.</p></div>
+          <div class="chart-wrap"><canvas id="savingsChart"></canvas></div>
+        </article>
+        <article class="chart-card">
+          <div class="chart-heading"><h3>Private investment</h3><p>Realized purchases that add to productive capital.</p></div>
+          <div class="chart-wrap"><canvas id="investmentChart"></canvas></div>
+        </article>
+        <article class="chart-card">
+          <div class="chart-heading"><h3>Productive capital stock</h3><p>Capital after investment and depreciation.</p></div>
+          <div class="chart-wrap"><canvas id="capitalChart"></canvas></div>
+        </article>
+        <article class="chart-card">
+          <div class="chart-heading"><h3>Capacity utilization</h3><p>Production relative to available productive capacity.</p></div>
+          <div class="chart-wrap"><canvas id="capacityChart"></canvas></div>
         </article>
         <article class="chart-card chart-card-wide">
           <div class="chart-heading"><h3>Economic scale</h3><p>Households, companies and products as the economy evolves.</p></div>

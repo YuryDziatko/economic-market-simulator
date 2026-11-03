@@ -26,6 +26,11 @@ KPI_REGISTRY: dict[str, dict[str, str]] = {
     "average_wage_annual": {"label": "Average annual wage", "unit": "currency", "delta": "percent"},
     "government_budget_balance": {"label": "Government budget balance", "unit": "currency", "delta": "absolute"},
     "public_debt": {"label": "Public debt", "unit": "currency", "delta": "percent"},
+    "household_savings_rate": {"label": "Household savings rate", "unit": "percent", "delta": "pp"},
+    "household_savings": {"label": "Household savings", "unit": "currency", "delta": "percent"},
+    "realized_investment": {"label": "Private investment", "unit": "currency", "delta": "percent"},
+    "capital_stock": {"label": "Productive capital stock", "unit": "currency", "delta": "percent"},
+    "capacity_utilization": {"label": "Capacity utilization", "unit": "percent", "delta": "pp"},
 }
 
 DEFAULT_KPIS: tuple[str, ...] = (
@@ -41,6 +46,11 @@ DEFAULT_KPIS: tuple[str, ...] = (
     "average_wage_annual",
     "government_budget_balance",
     "public_debt",
+    "household_savings_rate",
+    "household_savings",
+    "realized_investment",
+    "capital_stock",
+    "capacity_utilization",
 )
 
 
@@ -136,6 +146,10 @@ class ScenarioComparison:
             "unemployment": "Unemployment_Rate_End",
             "gini": "Income_Gini_End_Class_Average",
             "debt_to_gdp": "Debt_to_GDP_End",
+            "savings_rate": "Household_Savings_Rate_End",
+            "investment": "Realized_Investment",
+            "capital_stock": "Capital_Stock_End",
+            "capacity_utilization": "Capacity_Utilization_End",
         }
         return {
             name: self.yearly_metric(column).replace({np.nan: None}).to_dict(orient="records")

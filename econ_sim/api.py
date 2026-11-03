@@ -63,6 +63,11 @@ class SimulationResult:
             "unemployment_rate": float(final.get("Unemployment_Rate_End", 0.0)) if final else 0.0,
             "income_gini": float(final.get("Income_Gini_End_Class_Average", 0.0)) if final else 0.0,
             "public_debt_to_gdp": float(final.get("Debt_to_GDP_End", 0.0)) if final else 0.0,
+            "household_savings_rate": float(final.get("Household_Savings_Rate_End", 0.0)) if final else 0.0,
+            "household_savings": float(final.get("Household_Savings", 0.0)) if final else 0.0,
+            "realized_investment": float(final.get("Realized_Investment", 0.0)) if final else 0.0,
+            "capital_stock": float(final.get("Capital_Stock_End", 0.0)) if final else 0.0,
+            "capacity_utilization": float(final.get("Capacity_Utilization_End", 0.0)) if final else 0.0,
         }
 
     def frames(self) -> dict[str, pd.DataFrame]:
@@ -153,6 +158,8 @@ def run_simulation(
         employment_settings=tables["employment"],
         government_transfers=tables["government_transfers"],
         government_demand=tables["government_demand"],
+        savings_settings=tables["savings_settings"],
+        investment_demand=tables["investment_demand"],
         config=config,
         rng=rng,
     )

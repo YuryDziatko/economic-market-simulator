@@ -13,6 +13,9 @@ The current model includes:
 - demographic growth;
 - employment, unemployment, wages and productivity;
 - labor and capital household income;
+- household saving by income class;
+- retained business income and investment funding;
+- productive capital, depreciation and capacity utilization;
 - household and business taxes;
 - transfers, government purchases, budget balance and public debt.
 
@@ -94,6 +97,7 @@ econ_sim/
     households.py
     labor.py
     government.py
+    investment.py         # Phase 4A savings/investment/capital helpers
     firm_dynamics.py
     product_dynamics.py
     io.py                # Excel/table loaders and optional file outputs
@@ -254,3 +258,20 @@ New endpoints:
 - `POST /api/reports/comparison.zip`
 
 Long `product_monthly` output is intentionally omitted from standard downloadable reports because product innovation can make it extremely large. It remains available internally in `SimulationResult` and in local `save=True` runs.
+
+
+## Phase 4A — Savings, investment and productive capital
+
+Phase 4A closes the household-saving / business-investment loop. Household disposable income is now split between consumption and saving using class-specific saving rates from `Savings_Settings`. Saving rates respond to the gap between the policy interest rate and the neutral rate. A configurable share of post-tax business income is retained inside firms instead of being paid to households.
+
+Household savings plus retained business income form a carried-forward investment funding pool. Firms choose desired investment from depreciation needs, capacity utilization, prior shortages, prior margins, and the interest-rate environment. Realized investment purchases existing goods/services using the `Investment_Demand` COICOP weights, while the resulting productive capital is allocated to recipient markets using investment-attractiveness scores.
+
+Productive capital follows the monthly identity:
+
+```text
+Capital(t) = Capital(t-1) + Realized Investment(t) - Depreciation(t)
+```
+
+Capacity responds to capital changes and limits future production. Product innovation splits parent capital/capacity instead of creating productive assets from nothing, and annual firm entry/exit changes capital/capacity with the market.
+
+New dashboard/report metrics include household saving rate, household savings, private investment, productive capital stock, depreciation, investment funding pool, and capacity utilization. See `PHASE4A_SAVINGS_INVESTMENT_CAPITAL.md`.

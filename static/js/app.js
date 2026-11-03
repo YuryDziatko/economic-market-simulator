@@ -10,6 +10,13 @@ const percentFields = new Set([
   "government_consumption_share",
   "general_transfer_share",
   "debt_interest_rate",
+  "interest_rate",
+  "neutral_interest_rate",
+  "annual_depreciation_rate",
+  "initial_capacity_utilization",
+  "profit_retention_rate",
+  "max_monthly_capacity_growth",
+  "max_investment_share_of_funds",
 ]);
 const baselineFields = [
   "simulation_years", "num_households", "num_companies", "target_gini",
@@ -17,10 +24,15 @@ const baselineFields = [
   "annual_labor_productivity_growth", "product_innovation_chance",
   "unemployment_transfer_rate", "government_consumption_share",
   "general_transfer_share", "debt_interest_rate",
+  "interest_rate", "neutral_interest_rate", "annual_depreciation_rate",
+  "capital_output_ratio", "initial_capacity_utilization", "profit_retention_rate",
+  "investment_interest_sensitivity", "capital_efficiency",
+  "max_monthly_capacity_growth", "max_investment_share_of_funds",
 ];
 const scenarioPercentFields = new Set([
   "tax_rate", "corporate_profit_tax_rate", "annual_inflation",
   "demographic_growth", "annual_labor_productivity_growth", "product_innovation_chance",
+  "interest_rate", "profit_retention_rate",
 ]);
 
 let defaults = null;
@@ -36,6 +48,8 @@ const BUILTIN_PRESETS = [
   { name: "Population boom", overrides: { demographic_growth: 0.03 } },
   { name: "Productivity boom", overrides: { annual_labor_productivity_growth: 0.04 } },
   { name: "Innovation boom", overrides: { product_innovation_chance: 0.05 } },
+  { name: "High interest rates", overrides: { interest_rate: 0.08 } },
+  { name: "Low interest rates", overrides: { interest_rate: 0.01 } },
   { name: "Demand-squeeze stress", overrides: { tax_rate: 0.35, corporate_profit_tax_rate: 0.30, product_innovation_chance: 0.0 } },
 ];
 
@@ -103,6 +117,8 @@ function collectInputWarnings() {
   const years = numberFromInput("simulation_years");
   const gov = numberFromInput("government_consumption_share");
   const transfers = numberFromInput("general_transfer_share");
+  const interest = numberFromInput("interest_rate");
+  const depreciation = numberFromInput("annual_depreciation_rate");
 
   if (pop !== null && Math.abs(pop) >= 5) warnings.push(`Population growth of ${pop}% per year compounds very quickly and can dominate labor-market results.`);
   if (pop !== null && Math.abs(pop) >= 20) warnings.push("Population growth above ±20% is an extreme stress-test assumption rather than a typical demographic scenario.");
@@ -115,6 +131,8 @@ function collectInputWarnings() {
   if (gini !== null && gini >= 0.60) warnings.push(`A starting Gini of ${gini.toFixed(2)} represents very high income inequality.`);
   if (years !== null && years >= 25) warnings.push(`A ${years}-year simulation magnifies compounding assumptions; interpret long-horizon results cautiously.`);
   if (gov !== null && transfers !== null && gov + transfers > 100) warnings.push("Government purchases plus general transfers exceed 100% of gross tax revenue and must be reduced.");
+  if (interest !== null && interest >= 15) warnings.push(`A policy interest rate of ${interest}% strongly suppresses desired investment in Phase 4A.`);
+  if (depreciation !== null && depreciation >= 15) warnings.push(`Capital depreciation of ${depreciation}% per year is a severe capital-wear assumption.`);
   return warnings;
 }
 
@@ -220,6 +238,9 @@ function renderSingleInterpretation(summary, yearly, config) {
   }
   if (Number.isFinite(gini)) bullets.push(`Income inequality ended at a Gini of ${decimal(gini)}; the class-average Gini ${trendDirection(Number(first.Income_Gini_End_Class_Average), Number(final.Income_Gini_End_Class_Average))} over the displayed period.`);
   if (Number.isFinite(debt)) bullets.push(`Public debt finished at ${pct(debt)} of nominal GDP. The debt ratio reflects accumulated fiscal deficits/surpluses plus debt interest.`);
+  if (Number.isFinite(Number(summary.household_savings_rate))) bullets.push(`Households saved ${pct(Number(summary.household_savings_rate))} of disposable income in the final year; savings reduce current consumption but help fund productive investment.`);
+  if (Number.isFinite(Number(summary.realized_investment))) bullets.push(`Private investment totaled ${compactMoney(Number(summary.realized_investment))} in the final year, building productive capital after depreciation.`);
+  if (Number.isFinite(Number(summary.capacity_utilization))) bullets.push(`Productive capacity utilization ended at ${pct(Number(summary.capacity_utilization))}. Persistently high utilization encourages expansion investment; low utilization weakens it.`);
 
   const startProducts = Number(summary.starting_products);
   const finalProducts = Number(summary.final_products);
@@ -442,6 +463,7 @@ function readScenarioOverrides() {
   const keys = [
     "tax_rate", "corporate_profit_tax_rate", "annual_inflation",
     "demographic_growth", "annual_labor_productivity_growth", "product_innovation_chance",
+    "interest_rate", "profit_retention_rate",
   ];
   const overrides = {};
   for (const key of keys) {
@@ -544,6 +566,10 @@ function renderSingleCharts(rows) {
   singleSeriesChart("unemploymentChart", rows, "Unemployment_Rate_End", "Unemployment", { percent: true });
   singleSeriesChart("giniChart", rows, "Income_Gini_End_Class_Average", "Income Gini", { gini: true });
   singleSeriesChart("debtChart", rows, "Debt_to_GDP_End", "Debt / GDP", { percent: true });
+  singleSeriesChart("savingsChart", rows, "Household_Savings_Rate_End", "Savings rate", { percent: true });
+  singleSeriesChart("investmentChart", rows, "Realized_Investment", "Private investment", { currency: true });
+  singleSeriesChart("capitalChart", rows, "Capital_Stock_End", "Capital stock", { currency: true });
+  singleSeriesChart("capacityChart", rows, "Capacity_Utilization_End", "Capacity utilization", { percent: true });
 
   makeChart("scaleChart", {
     type: "line",
@@ -586,6 +612,10 @@ function renderComparisonCharts(yearly, summaries, scenarioName) {
   comparisonMetricChart("unemploymentChart", yearly.unemployment, { percent: true });
   comparisonMetricChart("giniChart", yearly.gini, { gini: true });
   comparisonMetricChart("debtChart", yearly.debt_to_gdp, { percent: true });
+  comparisonMetricChart("savingsChart", yearly.savings_rate, { percent: true });
+  comparisonMetricChart("investmentChart", yearly.investment, { currency: true });
+  comparisonMetricChart("capitalChart", yearly.capital_stock, { currency: true });
+  comparisonMetricChart("capacityChart", yearly.capacity_utilization, { percent: true });
 
   const baseline = summaries.Baseline;
   const scenario = summaries[scenarioName];
@@ -627,6 +657,10 @@ function renderSingleCards(summary, yearly) {
     card("Average annual wage", compactMoney(final.Average_Wage_Annual)),
     card("Government balance", compactMoney(final.Government_Budget_Balance)),
     card("Public debt", compactMoney(final.Public_Debt_End)),
+    card("Savings rate", pct(summary.household_savings_rate)),
+    card("Private investment", compactMoney(summary.realized_investment)),
+    card("Capital stock", compactMoney(summary.capital_stock)),
+    card("Capacity utilization", pct(summary.capacity_utilization)),
   ];
   document.getElementById("cards").innerHTML = cards.join("");
 }
@@ -658,6 +692,10 @@ function renderComparisonCards(data) {
     card("Average annual wage", compactMoney(summary.average_wage_annual), deltaFor("average_wage_annual")),
     card("Government balance", compactMoney(summary.government_budget_balance), deltaFor("government_budget_balance")),
     card("Public debt", compactMoney(summary.public_debt), deltaFor("public_debt")),
+    card("Savings rate", pct(summary.household_savings_rate), deltaFor("household_savings_rate")),
+    card("Private investment", compactMoney(summary.realized_investment), deltaFor("realized_investment")),
+    card("Capital stock", compactMoney(summary.capital_stock), deltaFor("capital_stock")),
+    card("Capacity utilization", pct(summary.capacity_utilization), deltaFor("capacity_utilization")),
   ];
   document.getElementById("cards").innerHTML = cards.join("");
 }

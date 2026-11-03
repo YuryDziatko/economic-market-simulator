@@ -29,7 +29,7 @@ def main() -> None:
     generated_gini = gini(result.households["Gross_Monthly_Income"])
 
     print("\n" + "=" * 92)
-    print("ECONOMIC MARKET SIMULATOR — CONFIG API")
+    print("ECONOMIC MARKET SIMULATOR — PHASE 4A")
     print("=" * 92)
     print(f"Simulation horizon          : {config.simulation_years} years")
     print(f"Random seed                 : {config.random_seed}")
@@ -53,6 +53,10 @@ def main() -> None:
         print(f"Companies                   : {int(final['Company_Count_End']):,}")
         print(f"Products                    : {int(final['Product_Count_End']):,}")
         print(f"Public debt / GDP           : {final['Debt_to_GDP_End']:.2%}")
+        print(f"Household savings rate      : {final['Household_Savings_Rate_End']:.2%}")
+        print(f"Private investment          : {money(final['Realized_Investment'])}")
+        print(f"Productive capital stock    : {money(final['Capital_Stock_End'])}")
+        print(f"Capacity utilization        : {final['Capacity_Utilization_End']:.2%}")
 
     if result.output_workbook:
         print(f"\nDetailed output             : {result.output_workbook}")
