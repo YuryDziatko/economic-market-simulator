@@ -286,3 +286,9 @@ Useful endpoints:
 - `POST /api/policy/simulate`
 
 See `POLICY_SYSTEM.md` and `examples/policy_schedule.py`.
+
+## Deterministic policy agents
+
+The policy layer now includes five reproducible annual strategies: `technocratic`, `market_liberal`, `social_democratic`, `state_directed`, and `hybrid`. Agents observe the completed prior year and choose a bounded `PolicyAction` for the next year. They never modify structural parameters directly.
+
+Use `GET /api/policy/agents` to inspect the catalog and `POST /api/policy/agents/simulate` to run one. See `DETERMINISTIC_POLICY_AGENTS.md` for details.

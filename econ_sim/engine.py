@@ -14,6 +14,7 @@ from .government import (
 )
 from .config import SimulationConfig
 from .policy import PolicyAction, PolicyDecision, PolicyState, apply_policy_action, normalize_policy_schedule
+from .agents import DeterministicPolicyAgent, EconomicSnapshot
 from .investment import (
     allocate_investment_goods_demand,
     desired_investment_budget,
@@ -44,6 +45,7 @@ def simulate(
     config: SimulationConfig,
     rng: np.random.Generator,
     policy_schedule: dict[int, PolicyAction] | None = None,
+    policy_agent: DeterministicPolicyAgent | None = None,
 ):
     config.validate()
     policy_schedule = normalize_policy_schedule(policy_schedule, simulation_years=config.simulation_years)
@@ -350,15 +352,48 @@ def simulate(
         year = (t - 1) // 12 + 1
         month_in_year = (t - 1) % 12 + 1
 
-        # Policy decisions occur at the start of a simulated year.  This is the
-        # controlled interface that deterministic rules and future AI agents use.
-        # Structural settings are intentionally not exposed here.
-        if month_in_year == 1 and year in policy_schedule:
-            action = policy_schedule[year]
+        # Policy decisions occur at the start of a simulated year. Explicit user
+        # schedules take precedence. Otherwise a deterministic agent can observe
+        # the completed prior year and propose one bounded PolicyAction.
+        action = policy_schedule.get(year) if month_in_year == 1 else None
+        decision_source = "schedule" if action is not None else None
+        observation = None
+        if month_in_year == 1 and action is None and policy_agent is not None and year > 1:
+            prior_rows = [r for r in monthly_rows if int(r.get("Year", -1)) == year - 1]
+            if prior_rows:
+                last = prior_rows[-1]
+                annual_nominal = float(sum(float(r.get("Nominal_GDP_Monthly", 0.0)) for r in prior_rows))
+                annual_investment = float(sum(float(r.get("Realized_Investment", 0.0)) for r in prior_rows))
+                annual_budget = float(sum(float(r.get("Government_Budget_Balance", 0.0)) for r in prior_rows))
+                observation = EconomicSnapshot(
+                    year=year - 1,
+                    real_gdp_growth=float(prior_year_real_growth),
+                    inflation=float(last.get("Inflation_12M", 0.0)),
+                    inflation_target=float(config.annual_inflation),
+                    unemployment_rate=float(last.get("Unemployment_Rate", 0.0)),
+                    income_gini=float(last.get("Income_Gini_Class_Average", 0.0)),
+                    debt_to_gdp=float(last.get("Public_Debt_End", 0.0)) / max(annual_nominal, 1e-9),
+                    capacity_utilization=float(last.get("Capacity_Utilization", 0.0)),
+                    household_savings_rate=float(last.get("Household_Savings_Rate", 0.0)),
+                    investment_share_of_gdp=annual_investment / max(annual_nominal, 1e-9),
+                    government_budget_balance_share=annual_budget / max(annual_nominal, 1e-9),
+                )
+                action = policy_agent.decide(observation, policy_state, config)
+                decision_source = "deterministic_agent"
+
+        if month_in_year == 1 and action is not None:
             before_policy = policy_state
             policy_state = apply_policy_action(policy_state, action)
             decision = PolicyDecision(year, before_policy, action, policy_state)
-            policy_history_rows.append(decision.to_record())
+            record = decision.to_record()
+            record["Decision_Source"] = decision_source
+            if policy_agent is not None and decision_source == "deterministic_agent":
+                record["Agent_Key"] = policy_agent.key
+                record["Agent_Name"] = policy_agent.name
+            if observation is not None:
+                for key, value in observation.to_dict().items():
+                    record[f"Observed_{key}"] = value
+            policy_history_rows.append(record)
 
             tax_rate = policy_state.tax_rate
             corporate_profit_tax_rate = policy_state.corporate_profit_tax_rate

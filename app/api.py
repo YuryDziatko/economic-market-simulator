@@ -9,14 +9,14 @@ from fastapi.responses import Response
 
 from econ_sim import (
     POLICY_FIELDS, POLICY_LIMITS, STRUCTURAL_FIELDS,
-    PolicyAction, SimulationConfig, compare_scenarios, run_simulation,
+    PolicyAction, SimulationConfig, agent_catalog, get_agent, compare_scenarios, run_simulation,
 )
 
 from .reports import (
     comparison_csv_zip_bytes, comparison_xlsx_bytes,
     simulation_csv_zip_bytes, simulation_xlsx_bytes,
 )
-from .schemas import CompareRequest, PolicySimulationRequest, SimulationRequest
+from .schemas import AgentSimulationRequest, CompareRequest, PolicySimulationRequest, SimulationRequest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -72,6 +72,51 @@ def policy_limits() -> dict[str, Any]:
         },
         "action_semantics": "All PolicyAction numeric values are annual deltas, not target levels.",
     }
+
+
+
+
+@router.get("/policy/agents")
+def deterministic_agents() -> dict[str, Any]:
+    return {
+        "agents": agent_catalog(),
+        "decision_frequency": "annual",
+        "first_decision_year": 2,
+        "note": "These are stylized deterministic policy strategies, not empirical descriptions of real governments.",
+    }
+
+
+@router.post("/policy/agents/simulate")
+def deterministic_agent_simulate(request: AgentSimulationRequest) -> dict[str, Any]:
+    try:
+        config = load_baseline_config().with_overrides(**request.overrides)
+        agent = get_agent(request.agent)
+        result = run_simulation(
+            config,
+            settings_path=SETTINGS_PATH,
+            product_path=PRODUCT_PATH,
+            save=False,
+            policy_agent=agent,
+        )
+    except (ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Deterministic agent simulation failed") from exc
+
+    payload: dict[str, Any] = {
+        "agent": {
+            "key": agent.key,
+            "name": agent.name,
+            "profile": next(item for item in agent_catalog() if item["key"] == agent.key),
+        },
+        "config": config.to_dict(),
+        "summary": result.summary(),
+        "yearly": _records(result.yearly_summary),
+        "policy_history": _records(result.policy_history),
+    }
+    if request.include_monthly:
+        payload["monthly"] = _records(result.monthly_macro)
+    return payload
 
 
 @router.post("/policy/simulate")

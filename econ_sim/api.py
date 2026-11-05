@@ -10,6 +10,7 @@ import pandas as pd
 from .companies import generate_companies, prepare_products
 from .config import SimulationConfig
 from .policy import PolicyAction, normalize_policy_schedule
+from .agents import DeterministicPolicyAgent
 from .engine import simulate
 from .households import generate_households
 from .io import load_products, load_settings, save_outputs
@@ -100,6 +101,7 @@ def run_simulation(
     output_dir: str | Path | None = None,
     save: bool = False,
     policy_schedule: dict[int, PolicyAction] | None = None,
+    policy_agent: DeterministicPolicyAgent | None = None,
 ) -> SimulationResult:
     """Run the complete economy from a typed config.
 
@@ -169,6 +171,7 @@ def run_simulation(
         config=config,
         rng=rng,
         policy_schedule=policy_schedule,
+        policy_agent=policy_agent,
     )
 
     result = SimulationResult(

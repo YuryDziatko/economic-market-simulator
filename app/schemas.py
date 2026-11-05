@@ -91,3 +91,21 @@ class PolicySimulationRequest(BaseModel):
         if unknown:
             raise ValueError(f"Unknown SimulationConfig field(s): {', '.join(unknown)}")
         return value
+
+
+class AgentSimulationRequest(BaseModel):
+    """Run one economy controlled annually by a deterministic policy agent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent: str
+    overrides: dict[str, Any] = Field(default_factory=dict)
+    include_monthly: bool = False
+
+    @field_validator("overrides")
+    @classmethod
+    def validate_agent_override_names(cls, value: dict[str, Any]) -> dict[str, Any]:
+        unknown = sorted(set(value) - CONFIG_FIELDS)
+        if unknown:
+            raise ValueError(f"Unknown SimulationConfig field(s): {', '.join(unknown)}")
+        return value
