@@ -31,9 +31,9 @@ class SimulationConfig:
     demographic_growth: float = 0.01
     company_growth_sensitivity: float = 1.0
     allow_company_exits: bool = False
-    price_adjustment_speed: float = 0.12
+    price_adjustment_speed: float = 0.04
     production_adjustment_speed: float = 0.25
-    max_monthly_price_change: float = 0.10
+    max_monthly_price_change: float = 0.03
     max_monthly_production_change: float = 0.15
     initial_inventory_months: float = 0.0
 
@@ -59,8 +59,13 @@ class SimulationConfig:
     innovation_price_max_multiplier: float = 1.15
     innovation_elasticity_noise: float = 0.05
     innovation_initial_firms: int = 1
-    max_new_products_per_month: int = 0
-    new_products_can_innovate: bool = True
+    max_new_products_per_month: int = 3
+    new_products_can_innovate: bool = False
+    product_retirement_enabled: bool = True
+    product_retirement_min_age_months: int = 24
+    product_retirement_low_demand_months: int = 12
+    product_retirement_market_share_threshold: float = 0.00002
+    max_product_retirements_per_month: int = 3
 
     # Labor market
     labor_force_participation: float = 0.65
@@ -157,6 +162,14 @@ class SimulationConfig:
             raise ValueError("savings_rate_sensitivity cannot be negative")
         if self.investment_interest_sensitivity < 0:
             raise ValueError("investment_interest_sensitivity cannot be negative")
+        if self.product_retirement_min_age_months < 1:
+            raise ValueError("product_retirement_min_age_months must be >= 1")
+        if self.product_retirement_low_demand_months < 1:
+            raise ValueError("product_retirement_low_demand_months must be >= 1")
+        if self.max_product_retirements_per_month < 0:
+            raise ValueError("max_product_retirements_per_month cannot be negative")
+        if not 0 <= self.product_retirement_market_share_threshold <= 1:
+            raise ValueError("product_retirement_market_share_threshold must be between 0 and 1")
 
         probability_fields = {
             "tax_rate": self.tax_rate,

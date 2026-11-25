@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from .demand import calibrate_baseline_spending, monthly_class_product_demand
-from .product_dynamics import launch_product_variants
+from .product_dynamics import launch_product_variants, retirement_candidates
 from .labor import prepare_labor_market, labor_and_income_state, next_average_wage
 from .government import (
     distribute_general_transfers,
@@ -88,6 +88,11 @@ def simulate(
     innovation_initial_firms = config.innovation_initial_firms
     max_new_products_per_month = config.max_new_products_per_month
     new_products_can_innovate = config.new_products_can_innovate
+    product_retirement_enabled = config.product_retirement_enabled
+    product_retirement_min_age_months = config.product_retirement_min_age_months
+    product_retirement_low_demand_months = config.product_retirement_low_demand_months
+    product_retirement_market_share_threshold = config.product_retirement_market_share_threshold
+    max_product_retirements_per_month = config.max_product_retirements_per_month
     labor_force_participation = config.labor_force_participation
     initial_unemployment_rate = config.initial_unemployment_rate
     labor_income_share_p0 = config.labor_income_share_p0
@@ -155,6 +160,7 @@ def simulate(
     )
     prior_imbalance = np.zeros(len(base_output), dtype=float)
     prior_margin = np.zeros(len(base_output), dtype=float)
+    product_low_demand_streak = np.zeros(len(base_output), dtype=int)
 
     # Firm counts are now endogenous. Market structure is reclassified from the
     # active number of producers after every annual entry/exit event.
@@ -265,6 +271,14 @@ def simulate(
         "CPI_Index": 100.0,
         "Inflation_MoM": 0.0,
         "Inflation_12M": 0.0,
+        "GDP_Deflator_Index": 100.0,
+        "GDP_Deflator_Inflation_12M": 0.0,
+        "CPI_Deflator_Inflation_Gap": 0.0,
+        "Nominal_GDP_Expenditure_Check": base_gdp_monthly,
+        "Real_GDP_Expenditure_Check": base_gdp_monthly,
+        "Nominal_GDP_Accounting_Gap": 0.0,
+        "Real_GDP_Accounting_Gap": 0.0,
+        "Inventory_Investment_Nominal": 0.0,
         "Planned_Consumption": float(period0_labor["Household_Consumption_Budget"]),
         "Household_Savings": float(period0_labor["Household_Savings"]),
         "Household_Savings_Rate": float(period0_labor["Household_Savings"] / max(period0_labor["Household_Disposable_Income"], 1e-9)),
@@ -290,6 +304,7 @@ def simulate(
         "Competitive_Products": int(np.sum(market_structure == "Competitive")),
         "Product_Count": len(product_meta),
         "New_Products_This_Month": 0,
+        "Retired_Products_This_Month": 0,
         "Labor_Force": period0_labor["Labor_Force"],
         "Employment": period0_labor["Employment"],
         "Unemployment": period0_labor["Unemployment"],
@@ -343,6 +358,7 @@ def simulate(
     })
 
     cpi_history = [100.0]
+    gdp_deflator_history = [100.0]
     prev_nominal_gdp = base_gdp_monthly
     prev_real_gdp = base_gdp_monthly
     prior_year_real_growth = 0.0
@@ -550,6 +566,10 @@ def simulate(
         )
         if not innovation_events.empty:
             product_event_rows.extend(innovation_events.to_dict("records"))
+            product_low_demand_streak = np.concatenate([
+                product_low_demand_streak,
+                np.zeros(len(innovation_events), dtype=int),
+            ])
         new_products_this_month = len(innovation_events)
         product_ids = product_meta["Product_ID"].astype(str).to_numpy()
 
@@ -734,6 +754,23 @@ def simulate(
         production_value = current_production * current_prices
         nominal_gdp = float(np.sum(production_value))
         real_gdp = float(np.sum(current_production * real_base_prices))
+
+        # Independent expenditure-side accounting check. Household, government and
+        # capital-goods sales plus the change in inventories should reconcile to
+        # production GDP (within floating-point tolerance).
+        inventory_change_nominal = float(np.sum((inventory_end - inventory_start) * current_prices))
+        inventory_change_real = float(np.sum((inventory_end - inventory_start) * real_base_prices))
+        nominal_gdp_expenditure = float(sales_value.sum()) + inventory_change_nominal
+        real_sales_value = float(np.sum(sales * real_base_prices))
+        real_gdp_expenditure = real_sales_value + inventory_change_real
+        nominal_accounting_gap = nominal_gdp - nominal_gdp_expenditure
+        real_accounting_gap = real_gdp - real_gdp_expenditure
+        gdp_deflator = 100.0 * nominal_gdp / max(real_gdp, 1e-9)
+        gdp_deflator_inflation_12m = (
+            gdp_deflator / gdp_deflator_history[t - 12] - 1.0
+            if t >= 12
+            else (gdp_deflator / 100.0) ** (12.0 / t) - 1.0
+        )
         price_relatives = np.divide(
             current_prices, cpi_ref_prices, out=np.ones_like(current_prices), where=cpi_ref_prices > 0
         )
@@ -820,6 +857,14 @@ def simulate(
             "CPI_Index": cpi,
             "Inflation_MoM": inflation_mom,
             "Inflation_12M": inflation_12m,
+            "GDP_Deflator_Index": gdp_deflator,
+            "GDP_Deflator_Inflation_12M": gdp_deflator_inflation_12m,
+            "CPI_Deflator_Inflation_Gap": inflation_12m - gdp_deflator_inflation_12m,
+            "Nominal_GDP_Expenditure_Check": nominal_gdp_expenditure,
+            "Real_GDP_Expenditure_Check": real_gdp_expenditure,
+            "Nominal_GDP_Accounting_Gap": nominal_accounting_gap,
+            "Real_GDP_Accounting_Gap": real_accounting_gap,
+            "Inventory_Investment_Nominal": inventory_change_nominal,
             "Planned_Consumption": planned_total,
             "Household_Savings": float(labor_macro["Household_Savings"]),
             "Household_Savings_Rate": float(labor_macro["Household_Savings"] / max(labor_macro["Household_Disposable_Income"], 1e-9)),
@@ -850,6 +895,7 @@ def simulate(
             "Competitive_Products": int(np.sum(market_structure == "Competitive")),
             "Product_Count": len(product_meta),
             "New_Products_This_Month": int(new_products_this_month),
+            "Retired_Products_This_Month": 0,
             "Labor_Force": labor_macro["Labor_Force"],
             "Employment": labor_macro["Employment"],
             "Unemployment": labor_macro["Unemployment"],
@@ -984,6 +1030,47 @@ def simulate(
         next_production = np.maximum(0.0, current_production * (1.0 + prod_change))
         next_production = np.minimum(next_production, next_capacity)
 
+        # Product lifecycle: original Excel seed goods are permanent. Only variants
+        # created inside the simulation can retire after sustained negligible demand.
+        total_sales_for_share = max(float(sales_value.sum()), 1e-9)
+        low_share = sales_value / total_sales_for_share <= product_retirement_market_share_threshold
+        product_low_demand_streak = np.where(low_share, product_low_demand_streak + 1, 0)
+        retired_this_month = 0
+        if product_retirement_enabled:
+            keep_mask, retirement_events = retirement_candidates(
+                product_meta, sales_value, product_low_demand_streak,
+                period_month=t,
+                min_age_months=product_retirement_min_age_months,
+                required_low_demand_months=product_retirement_low_demand_months,
+                market_share_threshold=product_retirement_market_share_threshold,
+                max_retirements_per_month=max_product_retirements_per_month,
+            )
+            retired_this_month = int((~keep_mask).sum())
+            if retired_this_month:
+                retirement_events["Year"] = year
+                retirement_events["Month_in_Year"] = month_in_year
+                product_event_rows.extend(retirement_events.to_dict("records"))
+                monthly_rows[-1]["Retired_Products_This_Month"] = retired_this_month
+                product_meta = product_meta.loc[keep_mask].reset_index(drop=True)
+                baseline_qty = baseline_qty[:, keep_mask]
+                next_prices = next_prices[keep_mask]
+                demand_ref_prices = demand_ref_prices[keep_mask]
+                real_base_prices = real_base_prices[keep_mask]
+                cpi_ref_prices = cpi_ref_prices[keep_mask]
+                cpi_weights = cpi_weights[keep_mask]
+                if cpi_weights.sum() > 0:
+                    cpi_weights = cpi_weights / cpi_weights.sum()
+                next_production = next_production[keep_mask]
+                inventory_end = inventory_end[keep_mask]
+                elasticities = elasticities[keep_mask]
+                firm_counts = firm_counts[keep_mask]
+                market_structure = market_structure[keep_mask]
+                capital_stock = capital_stock[keep_mask]
+                next_capacity = next_capacity[keep_mask]
+                imbalance = imbalance[keep_mask]
+                product_margin_proxy = product_margin_proxy[keep_mask]
+                product_low_demand_streak = product_low_demand_streak[keep_mask]
+
         inventory = inventory_end
         current_prices = next_prices
         current_production = next_production
@@ -994,6 +1081,7 @@ def simulate(
         current_government_purchase_budget = next_purchase_budget
         current_general_transfer_budget = next_transfer_budget
         cpi_history.append(cpi)
+        gdp_deflator_history.append(gdp_deflator)
         prev_nominal_gdp = nominal_gdp
         prev_real_gdp = real_gdp
 
@@ -1066,6 +1154,11 @@ def simulate(
             "Real_GDP_Growth_YoY": real_flow / prev_real_flow - 1.0,
             "Inflation_YoY": float(end["CPI_Index"] / start_cpi - 1.0),
             "CPI_Index_End": float(end["CPI_Index"]),
+            "GDP_Deflator_Index_End": float(end["GDP_Deflator_Index"]),
+            "GDP_Deflator_Inflation_12M_End": float(end["GDP_Deflator_Inflation_12M"]),
+            "CPI_Deflator_Inflation_Gap_End": float(end["CPI_Deflator_Inflation_Gap"]),
+            "Max_Abs_Nominal_GDP_Accounting_Gap": float(y["Nominal_GDP_Accounting_Gap"].abs().max()),
+            "Max_Abs_Real_GDP_Accounting_Gap": float(y["Real_GDP_Accounting_Gap"].abs().max()),
             "Household_Count_End": int(end["Household_Count"]),
             "Company_Count_End": int(end["Company_Count"]),
             "Planned_Consumption": float(y["Planned_Consumption"].sum()),
@@ -1090,6 +1183,7 @@ def simulate(
             "Competitive_Products_End": int(end["Competitive_Products"]),
             "Product_Count_End": int(end["Product_Count"]),
             "New_Products_Created": int(y["New_Products_This_Month"].sum()),
+            "Products_Retired": int(y["Retired_Products_This_Month"].sum()),
             "Labor_Force_End": float(end["Labor_Force"]),
             "Employment_End": float(end["Employment"]),
             "Unemployment_Rate_End": float(end["Unemployment_Rate"]),

@@ -58,6 +58,7 @@ def prepare_labor_market(
         "capital_weights": settings["Capital Income Weight"].to_numpy(float),
         "participation_multipliers": lf_multiplier,
         "base_labor_force": labor_force,
+        "base_households": int(len(households)),
         "base_employment": base_employment,
         "base_average_wage": base_average_wage,
         "target_unemployment_rate": target_unemployment,
@@ -117,11 +118,19 @@ def labor_and_income_state(
     wage_demand_factor = (base_real_wage / current_real_wage) ** wage_elasticity
     wage_demand_factor = float(np.clip(wage_demand_factor, 0.50, 2.00))
 
+    # Stabilized labor demand: anchor normal employment to the *current* labor force,
+    # then move away from that anchor only when real output deviates from potential.
+    # Potential output grows with population and labor productivity. This prevents
+    # unemployment from drifting upward mechanically in a healthy growing economy.
+    base_households = max(float(labor_calibration.get("base_households", current_households)), 1.0)
+    population_ratio = max(float(current_households) / base_households, 1e-9)
+    potential_output_ratio = population_ratio * productivity_index
+    output_gap_ratio = max(output_ratio / max(potential_output_ratio, 1e-9), 0.0)
+    normal_employment = labor_force * (1.0 - float(labor_calibration["target_unemployment_rate"]))
     desired_employment_pre_constraint = (
-        float(labor_calibration["base_employment"])
-        * (output_ratio ** elasticity)
+        normal_employment
+        * (output_gap_ratio ** elasticity)
         * wage_demand_factor
-        / max(productivity_index, 1e-9)
     )
 
     if desired_employment_pre_constraint > labor_force and desired_employment_pre_constraint > 0:
@@ -133,11 +142,11 @@ def labor_and_income_state(
         production_factor = 1.0
 
     adjusted_output_ratio = output_ratio * production_factor
+    adjusted_output_gap_ratio = max(adjusted_output_ratio / max(potential_output_ratio, 1e-9), 0.0)
     desired_employment = (
-        float(labor_calibration["base_employment"])
-        * (max(adjusted_output_ratio, 0.0) ** elasticity)
+        normal_employment
+        * (adjusted_output_gap_ratio ** elasticity)
         * wage_demand_factor
-        / max(productivity_index, 1e-9)
     )
     employment = min(desired_employment, labor_force)
     unemployment = max(labor_force - employment, 0.0)
@@ -291,6 +300,8 @@ def labor_and_income_state(
         "Labor_Productivity_Index": productivity_index,
         "Real_Wage_Index": current_real_wage / base_real_wage,
         "Labor_Wage_Demand_Factor": wage_demand_factor,
+        "Potential_Output_Ratio": potential_output_ratio,
+        "Output_Gap_Ratio": output_gap_ratio,
     }
     return macro, pd.DataFrame(rows), production_factor
 

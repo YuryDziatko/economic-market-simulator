@@ -226,3 +226,61 @@ def launch_product_variants(
         inventory, elasticities, firm_counts, market_structure,
         pd.DataFrame(event_rows), next_variant_number,
     )
+
+
+def retirement_candidates(
+    product_meta: pd.DataFrame,
+    sales_value: np.ndarray,
+    low_demand_streak: np.ndarray,
+    *,
+    period_month: int,
+    min_age_months: int,
+    required_low_demand_months: int,
+    market_share_threshold: float,
+    max_retirements_per_month: int,
+) -> tuple[np.ndarray, pd.DataFrame]:
+    """Return a keep-mask for retiring weak *simulation-created variants only*.
+
+    Seed products (Is_Innovation=False) are permanent and can never be retired.
+    This protects the original Product_List.xlsx economic basket while allowing
+    the simulated product universe to have entry as well as exit.
+    """
+    n = len(product_meta)
+    keep = np.ones(n, dtype=bool)
+    if n == 0 or max_retirements_per_month == 0:
+        return keep, pd.DataFrame()
+
+    total_sales = max(float(np.sum(sales_value)), 1e-9)
+    shares = np.asarray(sales_value, dtype=float) / total_sales
+    is_variant = product_meta.get("Is_Innovation", pd.Series(False, index=product_meta.index)).to_numpy(bool)
+    created = product_meta.get("Created_Period_Month", pd.Series(0, index=product_meta.index)).to_numpy(int)
+    age = int(period_month) - created
+    eligible = (
+        is_variant
+        & (age >= int(min_age_months))
+        & (np.asarray(low_demand_streak, dtype=int) >= int(required_low_demand_months))
+        & (shares <= float(market_share_threshold))
+    )
+    idx = np.flatnonzero(eligible)
+    cap = int(max_retirements_per_month)
+    if cap > 0 and len(idx) > cap:
+        # Retire weakest variants first; deterministic tie-breaker is row order.
+        idx = idx[np.argsort(shares[idx], kind="stable")[:cap]]
+    keep[idx] = False
+
+    rows = []
+    for i in idx:
+        row = product_meta.iloc[i]
+        rows.append({
+            "Period_Month": int(period_month),
+            "Event": "Product Retirement",
+            "Product_ID": str(row["Product_ID"]),
+            "Product": str(row["Product"]),
+            "Parent_Product_ID": str(row.get("Parent_Product_ID", "")),
+            "Division": str(row.get("Division", "")),
+            "Category": str(row.get("Category", "")),
+            "Age_Months": int(age[i]),
+            "Low_Demand_Streak": int(low_demand_streak[i]),
+            "Sales_Market_Share": float(shares[i]),
+        })
+    return keep, pd.DataFrame(rows)

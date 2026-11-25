@@ -292,3 +292,17 @@ See `POLICY_SYSTEM.md` and `examples/policy_schedule.py`.
 The policy layer now includes five reproducible annual strategies: `technocratic`, `market_liberal`, `social_democratic`, `state_directed`, and `hybrid`. Agents observe the completed prior year and choose a bounded `PolicyAction` for the next year. They never modify structural parameters directly.
 
 Use `GET /api/policy/agents` to inspect the catalog and `POST /api/policy/agents/simulate` to run one. See `DETERMINISTIC_POLICY_AGENTS.md` for details.
+
+## Model Stabilization Phase
+
+The current build includes a long-horizon stabilization layer:
+
+- original `data/Product_List.xlsx` seed goods are permanent and never edited by the simulation;
+- new product launches are capped by default and simulation-created variants cannot recursively innovate;
+- weak simulated variants can retire after sustained negligible demand;
+- labor demand is anchored to current labor force and potential output growth;
+- GDP is independently reconciled from the expenditure side;
+- CPI inflation and GDP-deflator inflation are both reported for validation;
+- price adjustment defaults are damped to reduce runaway deflation/inflation.
+
+See `MODEL_STABILIZATION.md` for details.

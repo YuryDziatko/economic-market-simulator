@@ -71,6 +71,10 @@ class SimulationResult:
             "realized_investment": float(final.get("Realized_Investment", 0.0)) if final else 0.0,
             "capital_stock": float(final.get("Capital_Stock_End", 0.0)) if final else 0.0,
             "capacity_utilization": float(final.get("Capacity_Utilization_End", 0.0)) if final else 0.0,
+            "gdp_deflator_inflation": float(final.get("GDP_Deflator_Inflation_12M_End", 0.0)) if final else 0.0,
+            "cpi_deflator_inflation_gap": float(final.get("CPI_Deflator_Inflation_Gap_End", 0.0)) if final else 0.0,
+            "max_nominal_gdp_accounting_gap": float(final.get("Max_Abs_Nominal_GDP_Accounting_Gap", 0.0)) if final else 0.0,
+            "products_retired_final_year": int(final.get("Products_Retired", 0)) if final else 0,
         }
 
     def frames(self) -> dict[str, pd.DataFrame]:
