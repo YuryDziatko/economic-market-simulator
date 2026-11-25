@@ -63,9 +63,21 @@ def simulate(
     company_growth_sensitivity = config.company_growth_sensitivity
     allow_company_exits = config.allow_company_exits
     price_adjustment_speed = config.price_adjustment_speed
+    price_adjustment_speed_up = config.price_adjustment_speed_up
+    price_adjustment_speed_down = config.price_adjustment_speed_down
+    price_cut_imbalance_threshold = config.price_cut_imbalance_threshold
+    inflation_expectation_anchor_weight = config.inflation_expectation_anchor_weight
     production_adjustment_speed = config.production_adjustment_speed
+    production_adjustment_speed_up = config.production_adjustment_speed_up
+    production_adjustment_speed_down = config.production_adjustment_speed_down
     max_monthly_price_change = config.max_monthly_price_change
+    max_monthly_price_increase = config.max_monthly_price_increase
+    max_monthly_price_decrease = config.max_monthly_price_decrease
     max_monthly_production_change = config.max_monthly_production_change
+    max_monthly_production_increase = config.max_monthly_production_increase
+    max_monthly_production_decrease = config.max_monthly_production_decrease
+    inventory_price_pressure_weight = config.inventory_price_pressure_weight
+    goods_inventory_carryover_rate = config.goods_inventory_carryover_rate
     initial_inventory_months = config.initial_inventory_months
     entry_shortage_weight = config.entry_shortage_weight
     entry_demand_growth_weight = config.entry_demand_growth_weight
@@ -101,6 +113,7 @@ def simulate(
     annual_labor_productivity_growth = config.annual_labor_productivity_growth
     wage_adjustment_speed = config.wage_adjustment_speed
     wage_inflation_pass_through = config.wage_inflation_pass_through
+    wage_productivity_pass_through = config.wage_productivity_pass_through
     max_monthly_wage_change = config.max_monthly_wage_change
     unemployment_transfer_rate = config.unemployment_transfer_rate
     corporate_profit_tax_rate = config.corporate_profit_tax_rate
@@ -121,6 +134,8 @@ def simulate(
     capital_efficiency = config.capital_efficiency
     max_monthly_capacity_growth = config.max_monthly_capacity_growth
     max_investment_share_of_funds = config.max_investment_share_of_funds
+    underutilization_scrap_threshold = config.underutilization_scrap_threshold
+    annual_underutilization_scrap_rate = config.annual_underutilization_scrap_rate
 
     months = int(years) * 12
     if months <= 0:
@@ -732,8 +747,12 @@ def simulate(
         inventory_end = np.maximum(available - sales, 0.0)
         unmet_qty = np.maximum(demand - available, 0.0)
 
-        denom = np.maximum(demand + available, 1e-9)
-        imbalance = (demand - available) / denom
+        # All carried inventory is available for sales, but old stock has only a
+        # partial effect on price-setting. This avoids an obsolete inventory pile
+        # creating a permanent deflationary signal.
+        price_effective_supply = current_production + inventory_start * inventory_price_pressure_weight
+        denom = np.maximum(demand + price_effective_supply, 1e-9)
+        imbalance = (demand - price_effective_supply) / denom
 
         sales_value = sales * current_prices
         household_demand_share = np.divide(
@@ -838,6 +857,9 @@ def simulate(
             annual_depreciation_rate=annual_depreciation_rate,
             capital_efficiency=capital_efficiency,
             max_monthly_capacity_growth=max_monthly_capacity_growth,
+            capacity_utilization=capacity_utilization_by_product,
+            underutilization_scrap_threshold=underutilization_scrap_threshold,
+            annual_underutilization_scrap_rate=annual_underutilization_scrap_rate,
         )
         aggregate_capacity_utilization = float(
             np.sum(current_production) / max(np.sum(current_capacity), 1e-9)
@@ -991,14 +1013,28 @@ def simulate(
             max_government_demand_growth=max_government_demand_growth,
         )
 
-        background = annual_inflation / 12.0
+        # Calibrated nominal-price dynamics. Firms are much more willing to raise
+        # prices in shortages than to cut them in surpluses, and expectations remain
+        # partially anchored to the long-run inflation target. Sustained deflation is
+        # therefore possible, but it requires a sufficiently deep/long excess-supply gap.
+        recent_inflation = inflation_12m if np.isfinite(inflation_12m) else annual_inflation
+        expected_annual_inflation = (
+            inflation_expectation_anchor_weight * annual_inflation
+            + (1.0 - inflation_expectation_anchor_weight) * recent_inflation
+        )
+        background = expected_annual_inflation / 12.0
         noise = rng.normal(0.0, price_noise, len(current_prices))
         noise -= np.median(noise)
-        price_change = background + price_adjustment_speed * imbalance + noise
+        market_price_pressure = np.where(
+            imbalance >= 0.0,
+            price_adjustment_speed_up * imbalance,
+            price_adjustment_speed_down * np.minimum(imbalance + price_cut_imbalance_threshold, 0.0),
+        )
+        price_change = background + market_price_pressure + noise
         price_change = np.clip(
             price_change,
-            -max_monthly_price_change,
-            max_monthly_price_change,
+            -max_monthly_price_decrease,
+            max_monthly_price_increase,
         )
         monthly_rows[-1]["Median_Product_Price_Change"] = float(np.median(price_change))
         next_prices = np.maximum(0.01, current_prices * (1.0 + price_change))
@@ -1011,6 +1047,8 @@ def simulate(
             inflation_mom=inflation_mom,
             wage_adjustment_speed=wage_adjustment_speed,
             wage_inflation_pass_through=wage_inflation_pass_through,
+            wage_productivity_pass_through=wage_productivity_pass_through,
+            annual_labor_productivity_growth=annual_labor_productivity_growth,
             max_monthly_wage_change=max_monthly_wage_change,
         )
         monthly_rows[-1]["Wage_Growth_MoM"] = wage_change
@@ -1021,14 +1059,39 @@ def simulate(
             for m in market_structure
         ])
         desired_ratio = np.divide(demand, np.maximum(current_production, 1e-9)) - 1.0
-        prod_change = production_adjustment_speed * market_speed * desired_ratio
+        production_speed = np.where(
+            desired_ratio >= 0.0,
+            production_adjustment_speed_up,
+            production_adjustment_speed_down,
+        )
+        prod_change = production_speed * market_speed * desired_ratio
         prod_change = np.clip(
             prod_change,
-            -max_monthly_production_change,
-            max_monthly_production_change,
+            -max_monthly_production_decrease,
+            max_monthly_production_increase,
         )
         next_production = np.maximum(0.0, current_production * (1.0 + prod_change))
         next_production = np.minimum(next_production, next_capacity)
+
+        # Inventory calibration. Service-like output cannot be stored; physical
+        # goods carry only part of unsold stock into the next month because of
+        # spoilage, markdown clearance, obsolescence and write-offs. This is an
+        # in-memory simulation rule and never modifies Product_List.xlsx.
+        nonstorable_units = {
+            "Hour", "Month", "Visit", "Ticket", "Year", "Trip", "Night",
+            "Meal", "Download", "Day", "Course", "Credit", "Per Person",
+            "Procedure", "Semester", "Test", "Top-up", "Total", "One-way",
+            "4-hour", "8-week", "Per $100", "kWh", "Therm"
+        }
+        units_now = product_meta["Unit"].astype(str).to_numpy()
+        inventory_carry = np.where(
+            np.isin(units_now, list(nonstorable_units)),
+            0.0,
+            goods_inventory_carryover_rate,
+        )
+        inventory_writeoff_qty = inventory_end * (1.0 - inventory_carry)
+        inventory_for_next = inventory_end * inventory_carry
+        monthly_rows[-1]["Inventory_Writeoff_Value"] = float(np.sum(inventory_writeoff_qty * current_prices))
 
         # Product lifecycle: original Excel seed goods are permanent. Only variants
         # created inside the simulation can retire after sustained negligible demand.
@@ -1062,6 +1125,7 @@ def simulate(
                     cpi_weights = cpi_weights / cpi_weights.sum()
                 next_production = next_production[keep_mask]
                 inventory_end = inventory_end[keep_mask]
+                inventory_for_next = inventory_for_next[keep_mask]
                 elasticities = elasticities[keep_mask]
                 firm_counts = firm_counts[keep_mask]
                 market_structure = market_structure[keep_mask]
@@ -1071,7 +1135,7 @@ def simulate(
                 product_margin_proxy = product_margin_proxy[keep_mask]
                 product_low_demand_streak = product_low_demand_streak[keep_mask]
 
-        inventory = inventory_end
+        inventory = inventory_for_next
         current_prices = next_prices
         current_production = next_production
         current_capacity = next_capacity

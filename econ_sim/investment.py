@@ -146,6 +146,9 @@ def update_capital_and_capacity(
     annual_depreciation_rate: float,
     capital_efficiency: float,
     max_monthly_capacity_growth: float,
+    capacity_utilization: np.ndarray | None = None,
+    underutilization_scrap_threshold: float = 0.0,
+    annual_underutilization_scrap_rate: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray, float, np.ndarray]:
     """Apply depreciation and realized investment, then update capacity.
 
@@ -156,6 +159,12 @@ def update_capital_and_capacity(
     old_capacity = np.maximum(capacity.astype(float), 0.0)
     monthly_dep_rate = max(float(annual_depreciation_rate), 0.0) / 12.0
     depreciation_by_product = old_capital * monthly_dep_rate
+    if capacity_utilization is not None and annual_underutilization_scrap_rate > 0:
+        utilization = np.clip(np.asarray(capacity_utilization, dtype=float), 0.0, 1.5)
+        threshold = max(float(underutilization_scrap_threshold), 1e-9)
+        underuse = np.clip((threshold - utilization) / threshold, 0.0, 1.0)
+        extra_scrap_rate = max(float(annual_underutilization_scrap_rate), 0.0) / 12.0
+        depreciation_by_product += old_capital * extra_scrap_rate * underuse
     depreciation_total = float(depreciation_by_product.sum())
 
     weights = np.maximum(np.asarray(recipient_scores, dtype=float), 0.0)

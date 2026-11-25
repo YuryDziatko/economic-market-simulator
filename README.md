@@ -306,3 +306,7 @@ The current build includes a long-horizon stabilization layer:
 - price adjustment defaults are damped to reduce runaway deflation/inflation.
 
 See `MODEL_STABILIZATION.md` for details.
+
+## Calibrated sticky-price baseline
+
+The current model includes asymmetric nominal price adjustment, inflation expectations, inventory clearance/write-offs, slower production contraction, calibrated labor feedback, and excess-capacity scrapping. See `MODEL_CALIBRATION.md`. The original `data/Product_List.xlsx` remains unchanged and is used only as the permanent seed goods database.

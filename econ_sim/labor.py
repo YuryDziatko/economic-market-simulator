@@ -314,12 +314,16 @@ def next_average_wage(
     inflation_mom: float,
     wage_adjustment_speed: float,
     wage_inflation_pass_through: float,
+    wage_productivity_pass_through: float,
+    annual_labor_productivity_growth: float,
     max_monthly_wage_change: float,
 ) -> tuple[float, float]:
     target_employment = max(labor_force * (1.0 - target_unemployment_rate), 1e-9)
     labor_gap = desired_employment_pre_constraint / target_employment - 1.0
+    monthly_productivity_growth = (1.0 + max(float(annual_labor_productivity_growth), -0.99)) ** (1.0 / 12.0) - 1.0
     wage_change = (
         float(wage_inflation_pass_through) * float(inflation_mom)
+        + float(wage_productivity_pass_through) * monthly_productivity_growth
         + float(wage_adjustment_speed) * labor_gap
     )
     cap = abs(float(max_monthly_wage_change))

@@ -32,9 +32,21 @@ class SimulationConfig:
     company_growth_sensitivity: float = 1.0
     allow_company_exits: bool = False
     price_adjustment_speed: float = 0.04
+    price_adjustment_speed_up: float = 0.04
+    price_adjustment_speed_down: float = 0.006
+    price_cut_imbalance_threshold: float = 0.04
+    inflation_expectation_anchor_weight: float = 0.80
     production_adjustment_speed: float = 0.25
+    production_adjustment_speed_up: float = 0.25
+    production_adjustment_speed_down: float = 0.08
     max_monthly_price_change: float = 0.03
+    max_monthly_price_increase: float = 0.03
+    max_monthly_price_decrease: float = 0.004
     max_monthly_production_change: float = 0.15
+    max_monthly_production_increase: float = 0.15
+    max_monthly_production_decrease: float = 0.05
+    inventory_price_pressure_weight: float = 0.25
+    goods_inventory_carryover_rate: float = 0.75
     initial_inventory_months: float = 0.0
 
     # Intelligent entry / exit
@@ -71,10 +83,11 @@ class SimulationConfig:
     labor_force_participation: float = 0.65
     initial_unemployment_rate: float = 0.04
     labor_income_share_p0: float = 0.65
-    labor_output_elasticity: float = 0.90
+    labor_output_elasticity: float = 0.10
     annual_labor_productivity_growth: float = 0.015
-    wage_adjustment_speed: float = 0.08
+    wage_adjustment_speed: float = 0.01
     wage_inflation_pass_through: float = 0.50
+    wage_productivity_pass_through: float = 0.75
     max_monthly_wage_change: float = 0.05
     unemployment_transfer_rate: float = 0.30
     labor_wage_demand_elasticity: float = 0.35
@@ -96,9 +109,11 @@ class SimulationConfig:
     initial_capacity_utilization: float = 0.85
     profit_retention_rate: float = 0.40
     investment_interest_sensitivity: float = 2.00
-    capital_efficiency: float = 0.50
+    capital_efficiency: float = 0.10
     max_monthly_capacity_growth: float = 0.03
     max_investment_share_of_funds: float = 0.90
+    underutilization_scrap_threshold: float = 0.65
+    annual_underutilization_scrap_rate: float = 0.04
 
     @classmethod
     def from_mapping(cls, values: dict[str, Any]) -> "SimulationConfig":
@@ -166,6 +181,24 @@ class SimulationConfig:
             raise ValueError("product_retirement_min_age_months must be >= 1")
         if self.product_retirement_low_demand_months < 1:
             raise ValueError("product_retirement_low_demand_months must be >= 1")
+        if not 0 <= self.inflation_expectation_anchor_weight <= 1:
+            raise ValueError("inflation_expectation_anchor_weight must be between 0 and 1")
+        if self.production_adjustment_speed_up < 0 or self.production_adjustment_speed_down < 0:
+            raise ValueError("production adjustment speeds cannot be negative")
+        if not 0 <= self.inventory_price_pressure_weight <= 1:
+            raise ValueError("inventory_price_pressure_weight must be between 0 and 1")
+        if not 0 <= self.goods_inventory_carryover_rate <= 1:
+            raise ValueError("goods_inventory_carryover_rate must be between 0 and 1")
+        if self.max_monthly_production_increase < 0 or self.max_monthly_production_decrease < 0:
+            raise ValueError("monthly production movement caps cannot be negative")
+        if self.price_adjustment_speed_up < 0 or self.price_adjustment_speed_down < 0:
+            raise ValueError("price adjustment speeds cannot be negative")
+        if self.max_monthly_price_increase < 0 or self.max_monthly_price_decrease < 0:
+            raise ValueError("monthly price movement caps cannot be negative")
+        if not 0 <= self.underutilization_scrap_threshold <= 1:
+            raise ValueError("underutilization_scrap_threshold must be between 0 and 1")
+        if not 0 <= self.annual_underutilization_scrap_rate <= 1:
+            raise ValueError("annual_underutilization_scrap_rate must be between 0 and 1")
         if self.max_product_retirements_per_month < 0:
             raise ValueError("max_product_retirements_per_month cannot be negative")
         if not 0 <= self.product_retirement_market_share_threshold <= 1:
